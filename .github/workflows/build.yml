@@ -1,16 +1,15 @@
-name: Build QuantumValue Windows EXE
+name: Build QuantumValue Windows Installer
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
-# Aggiunto per forzare l'uso di Node 24 e silenziare il deprecation warning
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build:
+  build-installer:
     runs-on: windows-latest
 
     steps:
@@ -27,12 +26,41 @@ jobs:
         python -m pip install --upgrade pip
         pip install PyQt6 yfinance pandas requests pyinstaller
 
-    - name: Creazione EXE con PyInstaller
+    - name: Creazione Cartella Eseguibile (PyInstaller)
       run: |
         pyinstaller --onedir --noconsole --name=QuantumValue_Analysis QuantumValue_Analysis.py
 
-    - name: Archiviazione Risultato
+    - name: Creazione script Inno Setup (.iss)
+      run: |
+        $issContent = @"
+        [Setup]
+        AppName=QuantumValue Analysis
+        AppVersion=0.0.20
+        AppPublisher=Enrico Martini
+        DefaultDirName={autopf}\QuantumValue Analysis
+        DefaultGroupName=QuantumValue Analysis
+        OutputDir=Output_Installer
+        OutputBaseFilename=QuantumValue_Analysis_Setup
+        Compression=lzma2
+        SolidCompression=yes
+        PrivilegesRequired=admin
+
+        [Files]
+        Source: "dist\QuantumValue_Analysis\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+        [Icons]
+        Name: "{group}\QuantumValue Analysis"; Filename: "{app}\QuantumValue_Analysis.exe"
+        Name: "{autodesktop}\QuantumValue Analysis"; Filename: "{app}\QuantumValue_Analysis.exe"
+        "@
+        Set-Content -Path "setup_config.iss" -Value $issContent
+
+    - name: Compilazione Installer (Inno Setup)
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup_config.iss
+
+    - name: Archiviazione Installer (.exe)
       uses: actions/upload-artifact@v4
       with:
-        name: QuantumValue-Windows-Binary
-        path: dist/QuantumValue_Analysis
+        name: QuantumValue-Setup
+        # Carica solo il file di installazione finale generato da Inno Setup
+        path: Output_Installer/QuantumValue_Analysis_Setup.exe
