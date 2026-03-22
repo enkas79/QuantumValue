@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch: # <-- INSERITO PER PERMETTERE L'AVVIO MANUALE
 
 jobs:
   build-windows:
