@@ -3,7 +3,11 @@ name: Build QuantumValue Windows EXE
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # Aggiunto per permetterti l'avvio manuale tramite pulsante
+  workflow_dispatch:
+
+# Aggiunto per forzare l'uso di Node 24 e silenziare il deprecation warning
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -25,15 +29,10 @@ jobs:
 
     - name: Creazione EXE con PyInstaller
       run: |
-        # Usiamo --onedir per massime prestazioni ed evitiamo il blocco console con --noconsole
         pyinstaller --onedir --noconsole --name=QuantumValue_Analysis QuantumValue_Analysis.py
-      # Se in futuro vorrai aggiungere un'icona, ti basterà caricare logo.ico nella repo 
-      # e aggiungere --icon=logo.ico al comando qui sopra.
 
     - name: Archiviazione Risultato
       uses: actions/upload-artifact@v4
       with:
         name: QuantumValue-Windows-Binary
-        # Salviamo l'intera cartella creata da PyInstaller. 
-        # GitHub Actions la trasformerà automaticamente in uno .zip scaricabile.
         path: dist/QuantumValue_Analysis
