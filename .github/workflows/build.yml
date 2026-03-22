@@ -1,41 +1,39 @@
-```yaml
 name: Build Windows Executable
 
-# L'azione si avvia in automatico quando crei un nuovo "Tag" su GitHub (es. v0.0.21)
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build-windows:
     runs-on: windows-latest
 
     steps:
-    - name: 📥 Checkout del codice
-      uses: actions/checkout@v4
+      - name: Checkout del codice
+        uses: actions/checkout@v4
 
-    - name: 🐍 Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    - name: 📦 Installazione Dipendenze
-      run: |
-        python -m pip install --upgrade pip
-        pip install yfinance pandas requests PyQt6 pyinstaller
+      - name: Installazione Dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas requests PyQt6 pyinstaller
 
-    - name: 🏗️ Compilazione con PyInstaller (Modalità Cartella)
-      run: |
-        pyinstaller --noconfirm --onedir --windowed --name "QuantumValue_Analysis" QuantumValue_Analysis.py
+      - name: Compilazione con PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --name "QuantumValue_Analysis" QuantumValue_Analysis.py
 
-    - name: 🗜️ Creazione archivio ZIP dell'eseguibile
-      run: |
-        Compress-Archive -Path dist\QuantumValue_Analysis\* -DestinationPath QuantumValue_Analysis_Windows.zip
+      - name: Creazione archivio ZIP
+        run: |
+          Compress-Archive -Path dist\QuantumValue_Analysis\* -DestinationPath QuantumValue_Analysis_Windows.zip
 
-    - name: 🚀 Upload ZIP nella Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: QuantumValue_Analysis_Windows.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload ZIP nella Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: QuantumValue_Analysis_Windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
