@@ -10,7 +10,3 @@
 
 ## 🛠️ Requisiti di Sistema e Installazione
 Se desideri eseguire il software dal codice sorgente, assicurati di avere Python 3.10+ installato.
-
-1. Clona la repository:
-   ```bash
-   git clone [https://github.com/TuoNome/QuantumValueRepo.git](https://github.com/TuoNome/QuantumValueRepo.git)
