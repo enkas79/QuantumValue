@@ -61,7 +61,7 @@ def global_exception_handler(exc_type, exc_value, exc_tb) -> None:
 APP_NAME: str = "QuantumValue Analysis"
 VERSION: str = "0.0.22"
 AUTHOR: str = "Enrico Martini"
-GITHUB_REPO: str = "enkas79/QuantumValueRepo"
+GITHUB_REPO: str = "enkas79/QuantumValue"
 
 YAHOO_EXCHANGE_MAP: Dict[str, str] = {
     "NYQ": "NYSE", "NMS": "NASDAQ", "MIL": "MIB30", "PAR": "CAC40",
