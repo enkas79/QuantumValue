@@ -6,9 +6,10 @@ Architettura rigorosa MVC (Model-View-Controller).
 Implementa type hints, gestione specifica delle eccezioni e PyQt6.
 Fix PyInstaller completo: GC protetta su tutti i QThread (Fetch, Search, Update).
 Integrazione storico variazioni: 1 Giorno (1D), 1 Settimana (1W), 1 Mese (1M), 1 Anno (1Y).
+Ripristino testi completi nella Guida Strategica.
 
 Autore: Enrico Martini
-Versione: 0.0.26
+Versione: 0.0.27
 """
 
 import sys
@@ -44,7 +45,7 @@ except ImportError as e:
 # CONFIGURAZIONE E COSTANTI GLOBALI
 # ==========================================
 APP_NAME: str = "QuantumValue Analysis"
-VERSION: str = "0.0.26"
+VERSION: str = "0.0.27"
 AUTHOR: str = "Enrico Martini"
 GITHUB_REPO: str = "enkas79/QuantumValueRepo"
 
@@ -420,10 +421,11 @@ class FetchWorker(QThread):
 # ==========================================
 
 class GuideDialog(QDialog):
+    """Finestra di dialogo dedicata alla spiegazione strategica delle metriche finanziarie."""
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Guida Strategica alle Metriche Value")
-        self.setMinimumSize(650, 650)
+        self.setMinimumSize(700, 650)
         layout = QVBoxLayout(self)
         browser = QTextBrowser()
         browser.setOpenExternalLinks(True)
@@ -431,13 +433,31 @@ class GuideDialog(QDialog):
         <h1 style='color: #2c3e50;'>La Strategia dell'Analisi Fondamentale</h1>
         <p>Questa applicazione si basa sui principi del <i>Value Investing</i> e della logica quantitativa per valutare la reale qualità e convenienza di un'azienda sul mercato.</p>
         <hr>
+
         <h2 style='color: #2980b9;'>1. Earnings Yield (EY) - Il "Re" del Valore</h2>
         <p>L'Earnings Yield è il reciproco del rapporto P/E ed è calcolato nella sua forma più robusta (utilizzata da Joel Greenblatt nella <i>Magic Formula</i>).</p>
+        <ul>
+            <li><b>Formula:</b> EBIT / Enterprise Value (EV)</li>
+            <li><b>Perché funziona:</b> A differenza del semplice P/E, l'EV include il debito e sottrae la cassa, fornendo una visione reale di quanto "costa" l'intera azienda rispetto ai suoi utili operativi.</li>
+            <li><b>Dati Statistici:</b> Strategie basate sull'acquisto del decile con il più alto Earnings Yield hanno storicamente sovraperformato l'S&P 500 con un <i>win rate</i> superiore al <b>65-70%</b> su orizzonti di 10 anni.</li>
+        </ul>
+
         <h2 style='color: #2980b9;'>2. Return on Invested Capital (ROIC) - Il Proxy della Qualità</h2>
         <p>Il ROIC misura l'efficienza con cui un'azienda genera profitti dal capitale investito (sia debito che equity).</p>
+        <ul>
+            <li><b>Formula:</b> NOPAT / Capitale Investito</li>
+            <li><b>Perché funziona:</b> Identifica le aziende con un "Moat" (fossato economico) elevato. Un ROIC costantemente superiore al costo del capitale (WACC) è il principale motore della creazione di valore a lungo termine.</li>
+            <li><b>Dati Statistici:</b> L'integrazione del ROIC in una strategia "Magic Formula" (combinato con l'Earnings Yield) ha prodotto rendimenti medi annui del <b>26,4% nel periodo 1991-2024</b>, battendo il mercato in 23 anni su 34 (win rate del <b>67,6%</b>).</li>
+        </ul>
+
         <h2 style='color: #2980b9;'>3. Enterprise Value to EBITDA (EV/EBITDA) - L'Indicatore di Resilienza</h2>
         <p>Questo multiplo è considerato molto più affidabile del Price-to-Book (P/B) o del P/E per confrontare aziende con diverse strutture di capitale.</p>
+        <ul>
+            <li><b>Perché funziona:</b> L'EBITDA è meno soggetto a manipolazioni contabili rispetto all'utile netto, e l'EV neutralizza le differenze di leva finanziaria tra le aziende.</li>
+            <li><b>Dati Statistici:</b> Studi di <i>O'Shaughnessy Asset Management</i> indicano che l'EV/EBITDA ha un "quintile spread" (la differenza di rendimento tra i titoli più economici e quelli più costosi) del <b>6,0%</b>, superando significativamente il 2,8% del P/B e il 5,1% del P/E.</li>
+        </ul>
         <hr>
+        
         <h3 style='color: #7f8c8d;'>Glossario delle Grandezze di Base</h3>
         <p style='font-size: 12px;'>
         <b>EBIT:</b> Utile Operativo (prima di interessi e tasse).<br>
