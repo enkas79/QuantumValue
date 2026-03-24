@@ -28,14 +28,14 @@ jobs:
 
     - name: Creazione Cartella Eseguibile (PyInstaller)
       run: |
-        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis QuantumValue_Analysis.py
+        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance QuantumValue_Analysis.py
 
     - name: Creazione script Inno Setup (.iss)
       run: |
         $issContent = @"
         [Setup]
         AppName=QuantumValue Analysis
-        AppVersion=0.0.20
+        AppVersion=0.0.26
         AppPublisher=Enrico Martini
         DefaultDirName={autopf}\QuantumValue Analysis
         DefaultGroupName=QuantumValue Analysis
