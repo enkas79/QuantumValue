@@ -1,15 +1,14 @@
 """
-QuantumValue Analysis - Strumento di Analisi Fondamentale.
+QuantumValue Analysis - Strumento di Analisi Fondamentale e Occasioni in Borsa.
 
-Modulo per l'analisi quantitativa azionaria (EY, ROIC, EV/EBITDA).
+Modulo per l'analisi quantitativa azionaria (EY, ROIC) e valutazione occasioni (PE, PS, PEG, EV/EBITDA).
 Architettura rigorosa MVC (Model-View-Controller).
 Implementa type hints, gestione specifica delle eccezioni e PyQt6.
 Fix PyInstaller completo: GC protetta su tutti i QThread (Fetch, Search, Update).
-Integrazione storico variazioni: 1 Giorno (1D), 1 Settimana (1W), 1 Mese (1M), 1 Anno (1Y).
-Ripristino testi completi nella Guida Strategica.
+Finestra bloccata dinamicamente sulla risoluzione schermo, UI compattata e punteggio Occasioni.
 
 Autore: Enrico Martini
-Versione: 0.0.27
+Versione: 0.3.0
 """
 
 import sys
@@ -32,9 +31,9 @@ try:
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QLabel, QLineEdit, QPushButton, QMessageBox, QGroupBox, QGridLayout,
         QDialog, QTextBrowser, QDialogButtonBox, QTableWidget,
-        QTableWidgetItem, QAbstractItemView, QHeaderView
+        QTableWidgetItem, QAbstractItemView, QHeaderView, QScrollArea, QTabWidget
     )
-    from PyQt6.QtGui import QAction, QFont, QDesktopServices
+    from PyQt6.QtGui import QAction, QFont, QDesktopServices, QScreen
     from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings, QTimer, QUrl, QObject
 except ImportError as e:
     print(f"Errore: PyQt6 non trovato. Eseguire 'pip install PyQt6'.\nDettagli: {e}")
@@ -45,7 +44,7 @@ except ImportError as e:
 # CONFIGURAZIONE E COSTANTI GLOBALI
 # ==========================================
 APP_NAME: str = "QuantumValue Analysis"
-VERSION: str = "0.0.27"
+VERSION: str = "0.3.0"
 AUTHOR: str = "Enrico Martini"
 GITHUB_REPO: str = "enkas79/QuantumValueRepo"
 
@@ -60,7 +59,14 @@ YAHOO_EXCHANGE_MAP: Dict[str, str] = {
 # GESTIONE ECCEZIONI GLOBALI (AIRBAG)
 # ==========================================
 def global_exception_handler(exc_type: type, exc_value: BaseException, exc_tb: Any) -> None:
-    """Cattura crash imprevisti nel thread principale ed evita la chiusura silenziosa."""
+    """
+    Cattura crash imprevisti nel thread principale ed evita la chiusura silenziosa.
+
+    Args:
+        exc_type (type): Tipo dell'eccezione sollevata.
+        exc_value (BaseException): Valore o messaggio dell'eccezione.
+        exc_tb (Any): Traceback dell'errore.
+    """
     error_msg: str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     msg = QMessageBox()
     msg.setIcon(QMessageBox.Icon.Critical)
@@ -114,6 +120,15 @@ class DataFormatter:
 
     @staticmethod
     def parse_to_float(value_str: str) -> float:
+        """
+        Converte una stringa formattata (es. '1.5M', '3,2B') in un float.
+
+        Args:
+            value_str (str): Valore stringa da parsare.
+
+        Returns:
+            float: Il valore numerico estratto.
+        """
         clean_str: str = value_str.strip().upper().replace(',', '.')
         if not clean_str:
             raise ValueError("Campo vuoto o non valido.")
@@ -131,11 +146,20 @@ class DataFormatter:
 
         try:
             return float(clean_str) * multiplier
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError):
             raise ValueError(f"Formato numerico non valido: '{value_str}'.")
 
     @staticmethod
     def format_to_string(value: float) -> str:
+        """
+        Formatta un float in una stringa leggibile (es. 1000000 -> '1.00M').
+
+        Args:
+            value (float): Valore da formattare.
+
+        Returns:
+            str: Valore stringa formattato con virgole al posto dei punti.
+        """
         try:
             abs_value: float = abs(value)
             if abs_value >= 1_000_000_000:
@@ -156,6 +180,15 @@ class FinancialCalculator:
 
     @staticmethod
     def calculate_metrics(data: Dict[str, float]) -> Dict[str, Union[float, str]]:
+        """
+        Esegue i calcoli finanziari di base partendo da un dizionario di input.
+
+        Args:
+            data (Dict[str, float]): Dati finanziari raw in ingresso.
+
+        Returns:
+            Dict[str, Union[float, str]]: Metriche calcolate o messaggi d'errore.
+        """
         results: Dict[str, Union[float, str]] = {}
 
         try:
@@ -185,7 +218,10 @@ class FinancialEvaluator:
     """Classe Model per l'assegnazione dei punteggi e la valutazione algoritmica."""
 
     @staticmethod
-    def evaluate(ey: float, roic: float, ev_ebitda: float) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
+    def evaluate_core(ey: float, roic: float, ev_ebitda: float) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
+        """
+        Valuta EY, ROIC e EV/EBITDA classici restituendo un voto globale di qualità.
+        """
         col_exc, col_good, col_fair, col_weak, col_bad = "#27ae60", "#2ecc71", "#f39c12", "#d35400", "#c0392b"
 
         if ey >= 10: s_ey, t_ey, c_ey = 10, "Eccellente (>=10%)", col_exc
@@ -217,6 +253,67 @@ class FinancialEvaluator:
         if avg_score >= 7.5: return avg_score, "ACQUISTO (Strong Buy)", col_exc, details
         elif avg_score >= 6.0: return avg_score, "DA ATTENDERE (Hold)", col_weak, details
         else: return avg_score, "LASCIAR PERDERE (Avoid)", col_bad, details
+
+    @staticmethod
+    def evaluate_opportunity(pe: float, ps: float, peg: float, ev_ebitda: float) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
+        """
+        Valuta i 4 indicatori per le "Occasioni in Borsa" fornendo un punteggio su 10 e un verdetto.
+
+        Args:
+            pe (float): Price to Earnings ratio.
+            ps (float): Price to Sales ratio.
+            peg (float): Price/Earnings to Growth ratio.
+            ev_ebitda (float): Enterprise Value / EBITDA.
+
+        Returns:
+            Tuple[float, str, str, Dict[str, Dict[str, str]]]: (Voto Finale, Testo Verdetto, Colore Verdetto, Dettagli GUI)
+        """
+        col_exc = "#27ae60" # Verde
+        col_fair = "#f39c12" # Arancio
+        col_bad = "#c0392b" # Rosso
+
+        res: Dict[str, Dict[str, str]] = {}
+        score: float = 0.0
+
+        # P/E (Ideale < 20)
+        if 0 < pe < 20: s_pe, t_pe, c_pe = 2.5, "Ideale (< 20)", col_exc
+        elif pe <= 0: s_pe, t_pe, c_pe = 0.0, "Negativo (Attenzione)", col_bad
+        else: s_pe, t_pe, c_pe = 1.0, "Alto (>= 20)", col_fair
+        res['pe'] = {'text': t_pe, 'color': c_pe}
+        score += s_pe
+
+        # P/S (Ideale < 2)
+        if 0 < ps < 2: s_ps, t_ps, c_ps = 2.5, "Ideale (< 2)", col_exc
+        elif ps <= 0: s_ps, t_ps, c_ps = 0.0, "N.D. / Negativo", col_bad
+        else: s_ps, t_ps, c_ps = 1.0, "Alto (>= 2)", col_fair
+        res['ps'] = {'text': t_ps, 'color': c_ps}
+        score += s_ps
+
+        # PEG (Ideale < 1)
+        if 0 < peg < 1: s_peg, t_peg, c_peg = 2.5, "Ideale (< 1)", col_exc
+        elif peg <= 0: s_peg, t_peg, c_peg = 0.0, "Negativo / N.D.", col_bad
+        else: s_peg, t_peg, c_peg = 1.0, "Alto (>= 1)", col_fair
+        res['peg'] = {'text': t_peg, 'color': c_peg}
+        score += s_peg
+
+        # EV/EBITDA (Ideale < 10)
+        if 0 < ev_ebitda < 10: s_ev, t_ev, c_ev = 2.5, "Ideale (< 10)", col_exc
+        elif ev_ebitda <= 0: s_ev, t_ev, c_ev = 0.0, "Negativo (Attenzione)", col_bad
+        else: s_ev, t_ev, c_ev = 1.0, "Alto (>= 10)", col_fair
+        res['ev_ebitda_occ'] = {'text': t_ev, 'color': c_ev}
+        score += s_ev
+
+        if score >= 7.5:
+            verdict = "GRANDE OCCASIONE"
+            v_color = col_exc
+        elif score >= 5.0:
+            verdict = "POSSIBILE OCCASIONE (Valutare)"
+            v_color = col_fair
+        else:
+            verdict = "NESSUNA OCCASIONE EVIDENTE"
+            v_color = col_bad
+
+        return score, verdict, v_color, res
 
 
 class TickerSearcher:
@@ -272,22 +369,20 @@ class FinancialDataFetcher:
         ev: float = float(info.get('enterpriseValue', 0.0) or 0.0)
         ebitda: float = float(info.get('ebitda', 0.0) or 0.0)
 
-        if ev == 0.0 and ebitda == 0.0:
-            raise ValueError("Dati EV/EBITDA non disponibili su Yahoo per questo titolo.")
-
-        # Download storico prezzi a 1 anno
         hist = ticker.history(period="1y")
         prices: Dict[str, float] = {'current': 0.0, '1d': 0.0, '1w': 0.0, '1m': 0.0, '1y': 0.0}
 
         if not hist.empty:
             closes = hist['Close']
             prices['current'] = float(closes.iloc[-1])
-
-            # Estrazione sicura basata sul numero effettivo di giorni di trading disponibili
             prices['1d'] = float(closes.iloc[-2]) if len(closes) >= 2 else prices['current']
-            prices['1w'] = float(closes.iloc[-6]) if len(closes) >= 6 else prices['current'] # ~1 settimana (5/6 gg lavorativi)
-            prices['1m'] = float(closes.iloc[-22]) if len(closes) >= 22 else prices['current'] # ~1 mese (20/22 gg lavorativi)
-            prices['1y'] = float(closes.iloc[0]) if len(closes) > 0 else prices['current'] # Il primo dato dell'anno
+            prices['1w'] = float(closes.iloc[-6]) if len(closes) >= 6 else prices['current']
+            prices['1m'] = float(closes.iloc[-22]) if len(closes) >= 22 else prices['current']
+            prices['1y'] = float(closes.iloc[0]) if len(closes) > 0 else prices['current']
+
+        pe: float = float(info.get('trailingPE', 0.0) or 0.0)
+        ps: float = float(info.get('priceToSalesTrailing12Months', 0.0) or 0.0)
+        peg: float = float(info.get('pegRatio', 0.0) or 0.0)
 
         inc_stmt = ticker.income_stmt
         bal_sheet = ticker.balance_sheet
@@ -325,7 +420,10 @@ class FinancialDataFetcher:
             'ev': ev,
             'nopat': nopat,
             'invested_capital': total_debt + equity,
-            'ebitda': ebitda
+            'ebitda': ebitda,
+            'pe': pe,
+            'ps': ps,
+            'peg': peg
         }
 
     def _fetch_from_fmp(self, ticker_symbol: str) -> Dict[str, Any]:
@@ -338,12 +436,19 @@ class FinancialDataFetcher:
             km_resp = requests.get(f"{base_url}/key-metrics-ttm/{ticker_symbol}?apikey={self.fmp_api_key}", timeout=10).json()
             km: dict = km_resp[0] if km_resp else {}
 
+            ratios_resp = requests.get(f"{base_url}/ratios-ttm/{ticker_symbol}?apikey={self.fmp_api_key}", timeout=10).json()
+            ratios: dict = ratios_resp[0] if ratios_resp else {}
+
             inc_resp = requests.get(f"{base_url}/income-statement/{ticker_symbol}?limit=1&apikey={self.fmp_api_key}", timeout=10).json()
             inc: dict = inc_resp[0] if inc_resp else {}
 
             ev: float = float(km.get('enterpriseValueTTM', 0.0) or 0.0)
             ebitda: float = float(inc.get('ebitda', 0.0) or 0.0)
             ebit: float = float(inc.get('operatingIncome', ebitda * 0.85) or ebitda * 0.85)
+
+            pe: float = float(ratios.get('peRatioTTM', 0.0) or 0.0)
+            ps: float = float(ratios.get('priceToSalesRatioTTM', 0.0) or 0.0)
+            peg: float = float(ratios.get('pegRatioTTM', 0.0) or 0.0)
 
             tax_rate: float = 0.21
             inc_before_tax: float = float(inc.get('incomeBeforeTax', 0) or 0)
@@ -354,7 +459,6 @@ class FinancialDataFetcher:
             nopat: float = ebit * (1 - min(max(tax_rate, 0.15), 0.35))
             invested_capital: float = float(km.get('investedCapitalTTM', ev * 0.8) or ev * 0.8)
 
-            # FMP fallback: restituisce il prezzo corrente, non avendo endpoint storici gratuiti integrati in questa chiamata
             curr_price = float(profile.get('price', 0.0))
             prices = {'current': curr_price, '1d': curr_price, '1w': curr_price, '1m': curr_price, '1y': curr_price}
 
@@ -363,7 +467,8 @@ class FinancialDataFetcher:
                 'currency': profile.get('currency', 'USD'),
                 'prices': prices,
                 'ebit': ebit, 'ev': ev, 'nopat': nopat,
-                'invested_capital': invested_capital, 'ebitda': ebitda
+                'invested_capital': invested_capital, 'ebitda': ebitda,
+                'pe': pe, 'ps': ps, 'peg': peg
             }
         except requests.exceptions.RequestException as e:
             raise ValueError(f"Errore di rete FMP: {str(e)}")
@@ -421,20 +526,21 @@ class FetchWorker(QThread):
 # ==========================================
 
 class GuideDialog(QDialog):
-    """Finestra di dialogo dedicata alla spiegazione strategica delle metriche finanziarie."""
+    """Finestra di dialogo dedicata alla spiegazione strategica delle metriche finanziarie e di prezzo."""
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Guida Strategica alle Metriche Value")
-        self.setMinimumSize(700, 650)
+        self.setWindowTitle("Guida Strategica alle Metriche Value e Occasioni")
+        self.setMinimumSize(750, 700)
         layout = QVBoxLayout(self)
         browser = QTextBrowser()
         browser.setOpenExternalLinks(True)
         html_content: str = """
         <h1 style='color: #2c3e50;'>La Strategia dell'Analisi Fondamentale</h1>
-        <p>Questa applicazione si basa sui principi del <i>Value Investing</i> e della logica quantitativa per valutare la reale qualità e convenienza di un'azienda sul mercato.</p>
+        <p>Questa applicazione si basa sui principi del <i>Value Investing</i> per valutare la reale qualità e convenienza di un'azienda sul mercato, abbinandoli a un'analisi rapida delle <b>Occasioni in Borsa</b>.</p>
         <hr>
 
-        <h2 style='color: #2980b9;'>1. Earnings Yield (EY) - Il "Re" del Valore</h2>
+        <h2 style='color: #2980b9;'>Analisi Core: Qualità e Valore (Value Investing)</h2>
+        <h3 style='color: #2980b9;'>1. Earnings Yield (EY) - Il "Re" del Valore</h3>
         <p>L'Earnings Yield è il reciproco del rapporto P/E ed è calcolato nella sua forma più robusta (utilizzata da Joel Greenblatt nella <i>Magic Formula</i>).</p>
         <ul>
             <li><b>Formula:</b> EBIT / Enterprise Value (EV)</li>
@@ -442,7 +548,7 @@ class GuideDialog(QDialog):
             <li><b>Dati Statistici:</b> Strategie basate sull'acquisto del decile con il più alto Earnings Yield hanno storicamente sovraperformato l'S&P 500 con un <i>win rate</i> superiore al <b>65-70%</b> su orizzonti di 10 anni.</li>
         </ul>
 
-        <h2 style='color: #2980b9;'>2. Return on Invested Capital (ROIC) - Il Proxy della Qualità</h2>
+        <h3 style='color: #2980b9;'>2. Return on Invested Capital (ROIC) - Il Proxy della Qualità</h3>
         <p>Il ROIC misura l'efficienza con cui un'azienda genera profitti dal capitale investito (sia debito che equity).</p>
         <ul>
             <li><b>Formula:</b> NOPAT / Capitale Investito</li>
@@ -450,11 +556,21 @@ class GuideDialog(QDialog):
             <li><b>Dati Statistici:</b> L'integrazione del ROIC in una strategia "Magic Formula" (combinato con l'Earnings Yield) ha prodotto rendimenti medi annui del <b>26,4% nel periodo 1991-2024</b>, battendo il mercato in 23 anni su 34 (win rate del <b>67,6%</b>).</li>
         </ul>
 
-        <h2 style='color: #2980b9;'>3. Enterprise Value to EBITDA (EV/EBITDA) - L'Indicatore di Resilienza</h2>
+        <h3 style='color: #2980b9;'>3. Enterprise Value to EBITDA (EV/EBITDA) - L'Indicatore di Resilienza</h3>
         <p>Questo multiplo è considerato molto più affidabile del Price-to-Book (P/B) o del P/E per confrontare aziende con diverse strutture di capitale.</p>
         <ul>
             <li><b>Perché funziona:</b> L'EBITDA è meno soggetto a manipolazioni contabili rispetto all'utile netto, e l'EV neutralizza le differenze di leva finanziaria tra le aziende.</li>
             <li><b>Dati Statistici:</b> Studi di <i>O'Shaughnessy Asset Management</i> indicano che l'EV/EBITDA ha un "quintile spread" (la differenza di rendimento tra i titoli più economici e quelli più costosi) del <b>6,0%</b>, superando significativamente il 2,8% del P/B e il 5,1% del P/E.</li>
+        </ul>
+        <hr>
+
+        <h2 style='color: #27ae60;'>Come trovare Occasioni in Borsa (I 4 Indicatori Rapidi)</h2>
+        <p>Questa sezione si concentra sui multipli di mercato essenziali per capire se si sta pagando il giusto prezzo in rapporto alla crescita e ai ricavi, come evidenziato dalla strategia d'investimento:</p>
+        <ul>
+            <li><b>P/E (Price/Earnings):</b> Indica quanto stai pagando per ogni euro di utile. <b>Ideale se P/E < 20</b>. Buon prezzo rispetto agli utili.</li>
+            <li><b>P/S (Price/Sales):</b> Misura quanto il mercato paga un'azienda rispetto ai suoi ricavi. <b>Ideale se P/S < 2</b>. Buon prezzo rispetto ai ricavi.</li>
+            <li><b>PEG (Price/Earnings to Growth):</b> Indica quanto stai pagando per ogni euro di utile, considerando anche il tasso di crescita atteso. <b>Ideale se PEG < 1</b>. Buon prezzo rispetto alla crescita degli utili.</li>
+            <li><b>EV/EBITDA:</b> Indica quanto stai pagando per l'intero business, debiti inclusi. <b>Ideale se EV/EBITDA < 10</b>. Buon prezzo rispetto ai flussi operativi.</li>
         </ul>
         <hr>
         
@@ -586,6 +702,7 @@ class MainWindow(QMainWindow):
         self.update_worker: Optional[UpdateCheckWorker] = None
 
         self.currency_symbol: str = ""
+        self.inputs: Dict[str, QLineEdit] = {}
 
         self._init_ui()
         QTimer.singleShot(200, self._check_first_run_setup)
@@ -602,20 +719,44 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("API Key FMP configurata. Resilienza dati attivata.")
             self.settings.setValue("fmp_asked_once", True)
 
+    def _center_and_lock_window(self) -> None:
+        """Calcola la dimensione fissa in base alla risoluzione e blocca il resize della finestra."""
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geom = screen.availableGeometry()
+            w = int(screen_geom.width() * 0.6)
+            h = int(screen_geom.height() * 0.7)
+
+            # Limiti minimi e massimi per evitare finestre abnormi
+            w = max(800, min(w, 1100))
+            h = max(750, min(h, 900))
+
+            # Blocca la grandezza della finestra come richiesto
+            self.setFixedSize(w, h)
+
+            x = (screen_geom.width() - w) // 2
+            y = (screen_geom.height() - h) // 2
+            self.move(x, y)
+
     def _init_ui(self) -> None:
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
-        self.setMinimumSize(650, 650)
+        self._center_and_lock_window()
+
         self.setStyleSheet("""
             QMainWindow { background-color: #f0f2f5; }
             QGroupBox { font-weight: bold; border: 1px solid #c8d6e5; border-radius: 6px; margin-top: 10px; background-color: white; }
             QLineEdit { border: 1px solid #c8d6e5; border-radius: 4px; padding: 5px; }
             QPushButton { font-weight: bold; border-radius: 4px; }
+            QTabWidget::pane { border: 1px solid #c8d6e5; background: white; border-radius: 6px; }
+            QTabBar::tab { background: #e0e6ed; padding: 10px; font-weight: bold; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px;}
+            QTabBar::tab:selected { background: white; color: #2980b9; border-bottom: 2px solid white; }
         """)
 
         self._create_menu_bar()
+
         central_widget = QWidget()
-        self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        self.setCentralWidget(central_widget)
 
         title_label = QLabel(APP_NAME)
         title_label.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
@@ -625,18 +766,30 @@ class MainWindow(QMainWindow):
         self._create_search_section(main_layout)
         self._create_input_section(main_layout)
 
-        bottom_layout = QHBoxLayout()
-        self._create_results_section(bottom_layout)
-        self._create_evaluation_section(bottom_layout)
+        # Tab Widget
+        self.tabs = QTabWidget()
+        self.tab_value = QWidget()
+        self.tab_opp = QWidget()
+        self.tabs.addTab(self.tab_value, "Analisi Strutturale Value")
+        self.tabs.addTab(self.tab_opp, "Occasioni in Borsa")
 
-        main_layout.addLayout(bottom_layout)
-        main_layout.addStretch(1)
+        self._setup_tab_value(self.tab_value)
+        self._setup_tab_opportunity(self.tab_opp)
 
+        main_layout.addWidget(self.tabs, stretch=1)
+
+        # Pulsante Uscita ridimensionato e centrato
+        exit_layout = QHBoxLayout()
         self.btn_exit = QPushButton("Esci dal Programma")
+        self.btn_exit.setFixedWidth(200) # Ridimensionamento richiesto
         self.btn_exit.setMinimumHeight(40)
-        self.btn_exit.setStyleSheet("background-color: #e66767; color: white; padding: 10px;")
+        self.btn_exit.setStyleSheet("background-color: #e66767; color: white; padding: 10px; margin-top: 10px;")
         self.btn_exit.clicked.connect(self.close)
-        main_layout.addWidget(self.btn_exit)
+
+        exit_layout.addStretch()
+        exit_layout.addWidget(self.btn_exit)
+        exit_layout.addStretch()
+        main_layout.addLayout(exit_layout)
 
         self.statusBar().showMessage("Pronto. Scrivi il Ticker o il Nome Azienda e premi Invio.")
 
@@ -660,6 +813,8 @@ class MainWindow(QMainWindow):
         guide_action.triggered.connect(lambda: GuideDialog(self).exec())
         help_menu.addAction(guide_action)
         help_menu.addSeparator()
+
+        # Menu Info (Autore e Versione come richiesto dalle rules)
         about_action = QAction("&Info", self)
         about_action.triggered.connect(lambda: InfoDialog(self).exec())
         help_menu.addAction(about_action)
@@ -701,13 +856,18 @@ class MainWindow(QMainWindow):
         search_layout = QHBoxLayout(search_group)
         self.input_ticker = QLineEdit()
         self.input_ticker.setPlaceholderText("Es. AAPL oppure Apple...")
+        self.input_ticker.setMaximumWidth(280) # Casella di ricerca accorciata
         self.input_ticker.textChanged.connect(self._force_uppercase_ticker)
         self.input_ticker.returnPressed.connect(self._on_search_requested)
-        search_layout.addWidget(self.input_ticker, stretch=1)
+        search_layout.addWidget(self.input_ticker)
+
         self.btn_fetch = QPushButton(" Cerca/Scarica")
+        self.btn_fetch.setMaximumWidth(150)
         self.btn_fetch.setStyleSheet("background-color: #2e86de; color: white; padding: 5px 15px;")
         self.btn_fetch.clicked.connect(self._on_search_requested)
         search_layout.addWidget(self.btn_fetch)
+
+        search_layout.addStretch() # Mantiene tutto a sinistra senza stretchare i campi
         layout.addWidget(search_group)
 
     def _force_uppercase_ticker(self, text: str) -> None:
@@ -726,7 +886,6 @@ class MainWindow(QMainWindow):
         self.lbl_company_name.setStyleSheet("color: #2980b9; font-weight: bold; font-size: 14px;")
         grid_layout.addWidget(self.lbl_company_name, 0, 0, 1, 4)
 
-        # Nuova interfaccia estesa per lo storico dei prezzi
         price_layout = QHBoxLayout()
         self.lbl_price = QLabel("Prezzo: --")
         self.lbl_price.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
@@ -752,15 +911,20 @@ class MainWindow(QMainWindow):
         price_layout.addStretch()
         grid_layout.addLayout(price_layout, 1, 0, 1, 4)
 
-        self.inputs: Dict[str, QLineEdit] = {}
+        # Compattazione Inputs su colonne e accorciamento caselle dati
+        grid_layout.setColumnStretch(1, 0)
+        grid_layout.setColumnStretch(3, 1)
+
         fields = [
-            ('ebit', 'EBIT:', 2, 0), ('ev', 'Enterprise Value:', 2, 2),
-            ('nopat', 'NOPAT:', 3, 0), ('invested_capital', 'Capitale Investito:', 3, 2),
-            ('ebitda', 'EBITDA:', 4, 0)
+            ('ebit', 'EBIT:', 2, 0), ('ev', 'EV:', 2, 2),
+            ('nopat', 'NOPAT:', 3, 0), ('invested_capital', 'Cap. Investito:', 3, 2),
+            ('ebitda', 'EBITDA:', 4, 0), ('pe', 'P/E Ratio:', 4, 2),
+            ('ps', 'P/S Ratio:', 5, 0), ('peg', 'PEG Ratio:', 5, 2)
         ]
 
         for key, text, row, col in fields:
             le = QLineEdit()
+            le.setMaximumWidth(160) # Caselle dati accorciate
             le.textChanged.connect(self._on_input_changed)
             grid_layout.addWidget(QLabel(text), row, col)
             grid_layout.addWidget(le, row, col + 1)
@@ -768,42 +932,88 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(input_group)
 
-    def _create_results_section(self, layout: QHBoxLayout) -> None:
-        res_group = QGroupBox("3. Metriche Analizzate")
-        inner_layout = QVBoxLayout(res_group)
+    def _setup_tab_value(self, tab: QWidget) -> None:
+        """Costruisce il contenuto del Tab Value Investing."""
+        layout = QVBoxLayout(tab)
+
+        metrics_group = QGroupBox("Metriche Analizzate")
+        inner_layout = QVBoxLayout(metrics_group)
         self.res_labels: Dict[str, QLabel] = {}
         self.res_eval_labels: Dict[str, QLabel] = {}
+
         metrics = [('ey', 'Earnings Yield:'), ('roic', 'ROIC:'), ('ev_ebitda', 'EV/EBITDA:')]
         for key, title in metrics:
-            row_layout = QVBoxLayout()
-            top_row = QHBoxLayout()
-            top_row.addWidget(QLabel(title))
+            row_layout = QHBoxLayout()
+            row_layout.addWidget(QLabel(title))
             lbl_val = QLabel("--")
             lbl_val.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
-            top_row.addStretch()
-            top_row.addWidget(lbl_val)
+            row_layout.addWidget(lbl_val)
+            row_layout.addStretch()
             lbl_eval = QLabel("")
             lbl_eval.setAlignment(Qt.AlignmentFlag.AlignRight)
-            row_layout.addLayout(top_row)
             row_layout.addWidget(lbl_eval)
+
             self.res_labels[key] = lbl_val
             self.res_eval_labels[key] = lbl_eval
             inner_layout.addLayout(row_layout)
-        inner_layout.addStretch()
-        layout.addWidget(res_group, stretch=1)
 
-    def _create_evaluation_section(self, layout: QHBoxLayout) -> None:
-        eval_group = QGroupBox("4. Verdetto Finale")
+        layout.addWidget(metrics_group)
+
+        eval_group = QGroupBox("Verdetto Qualità Aziendale")
         eval_layout = QVBoxLayout(eval_group)
         self.lbl_score = QLabel("- / 10")
         self.lbl_score.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
         self.lbl_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_recommendation = QLabel("In attesa di dati...")
         self.lbl_recommendation.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        eval_layout.addSpacing(20)
+        eval_layout.addSpacing(10)
         eval_layout.addWidget(self.lbl_score)
         eval_layout.addWidget(self.lbl_recommendation)
-        layout.addWidget(eval_group, stretch=1)
+        layout.addWidget(eval_group)
+        layout.addStretch()
+
+    def _setup_tab_opportunity(self, tab: QWidget) -> None:
+        """Costruisce il contenuto del Tab Occasioni in Borsa."""
+        layout = QVBoxLayout(tab)
+
+        opp_group = QGroupBox("Valutazione Multipli di Mercato")
+        inner_layout = QVBoxLayout(opp_group)
+        self.opp_labels: Dict[str, QLabel] = {}
+        self.opp_eval_labels: Dict[str, QLabel] = {}
+
+        metrics = [('pe', 'P/E (Prezzo/Utile):'), ('ps', 'P/S (Prezzo/Ricavi):'),
+                   ('peg', 'PEG (P/E to Growth):'), ('ev_ebitda_occ', 'EV/EBITDA:')]
+        for key, title in metrics:
+            row_layout = QHBoxLayout()
+            row_layout.addWidget(QLabel(title))
+            lbl_val = QLabel("--")
+            lbl_val.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
+            row_layout.addWidget(lbl_val)
+            row_layout.addStretch()
+            lbl_eval = QLabel("")
+            lbl_eval.setAlignment(Qt.AlignmentFlag.AlignRight)
+            row_layout.addWidget(lbl_eval)
+
+            self.opp_labels[key] = lbl_val
+            self.opp_eval_labels[key] = lbl_eval
+            inner_layout.addLayout(row_layout)
+
+        layout.addWidget(opp_group)
+
+        # Nuovo Punteggio Valutazione Opportunità
+        eval_opp_group = QGroupBox("Verdetto Occasione in Borsa")
+        eval_opp_layout = QVBoxLayout(eval_opp_group)
+        self.lbl_opp_score = QLabel("- / 10")
+        self.lbl_opp_score.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
+        self.lbl_opp_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_opp_recommendation = QLabel("In attesa di dati...")
+        self.lbl_opp_recommendation.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        eval_opp_layout.addSpacing(10)
+        eval_opp_layout.addWidget(self.lbl_opp_score)
+        eval_opp_layout.addWidget(self.lbl_opp_recommendation)
+        layout.addWidget(eval_opp_group)
+
+        layout.addStretch()
 
     def _on_search_requested(self) -> None:
         query: str = self.input_ticker.text().strip()
@@ -855,7 +1065,6 @@ class MainWindow(QMainWindow):
         self.lbl_company_name.setText(f"Azienda: {data.pop('company_name', 'N/A')}")
         self.currency_symbol = data.pop('currency', '$')
 
-        # Rendering Variazioni Storiche di Prezzo
         prices: Dict[str, float] = data.pop('prices', {})
         curr: float = prices.get('current', 0.0)
         self.lbl_price.setText(f"Prezzo: {curr:.2f} {self.currency_symbol}")
@@ -903,15 +1112,17 @@ class MainWindow(QMainWindow):
             for k, e in self.inputs.items():
                 val_data[k] = DataFormatter.parse_to_float(e.text())
 
-            results: Dict[str, Union[float, str]] = self.calculator.calculate_metrics(val_data)
-            self._display_results(results)
+            results_core: Dict[str, Union[float, str]] = self.calculator.calculate_metrics(val_data)
+            self._display_results(results_core, val_data)
         except ValueError:
             self._reset_results()
 
-    def _display_results(self, results: Dict[str, Union[float, str]]) -> None:
-        ey, roic, ev_eb = results.get('ey'), results.get('roic'), results.get('ev_ebitda')
+    def _display_results(self, results_core: Dict[str, Union[float, str]], raw_data: Dict[str, float]) -> None:
+        ey, roic, ev_eb = results_core.get('ey'), results_core.get('roic'), results_core.get('ev_ebitda')
+        pe, ps, peg = raw_data.get('pe', 0.0), raw_data.get('ps', 0.0), raw_data.get('peg', 0.0)
 
-        def set_val(k: str, v: Union[float, str], suf: str) -> None:
+        # 1. Popola Metriche Value Core (TAB 1)
+        def set_val_core(k: str, v: Union[float, str], suf: str) -> None:
             lbl = self.res_labels[k]
             if isinstance(v, float):
                 lbl.setText(f"{v:.2f}{suf}")
@@ -920,29 +1131,82 @@ class MainWindow(QMainWindow):
                 lbl.setText(str(v))
                 lbl.setStyleSheet("color: #e74c3c; font-size: 10px;")
 
-        set_val('ey', ey if ey is not None else "", "%")
-        set_val('roic', roic if roic is not None else "", "%")
-        set_val('ev_ebitda', ev_eb if ev_eb is not None else "", "x")
+        set_val_core('ey', ey if ey is not None else "", "%")
+        set_val_core('roic', roic if roic is not None else "", "%")
+        set_val_core('ev_ebitda', ev_eb if ev_eb is not None else "", "x")
 
+        # 2. Popola Occasioni In Borsa (TAB 2)
+        def set_val_opp(k: str, v: Union[float, str], suf: str) -> None:
+            lbl = self.opp_labels[k]
+            if isinstance(v, float):
+                lbl.setText(f"{v:.2f}{suf}")
+                lbl.setStyleSheet("color: #222f3e;")
+            else:
+                lbl.setText(str(v))
+                lbl.setStyleSheet("color: #e74c3c; font-size: 10px;")
+
+        set_val_opp('pe', pe, "x")
+        set_val_opp('ps', ps, "x")
+        set_val_opp('peg', peg, "x")
+        set_val_opp('ev_ebitda_occ', ev_eb if ev_eb is not None else "", "x")
+
+        # 3. Valutazioni Qualità & Verdetto
         if isinstance(ey, float) and isinstance(roic, float) and isinstance(ev_eb, float):
-            score, txt, color, details = self.evaluator.evaluate(ey, roic, ev_eb)
+            # Valutazione Core (Tab 1)
+            score, txt, color, details = self.evaluator.evaluate_core(ey, roic, ev_eb)
             self.lbl_score.setText(f"{score} / 10")
             self.lbl_score.setStyleSheet(f"color: {color};")
             self.lbl_recommendation.setText(txt)
             self.lbl_recommendation.setStyleSheet(f"color: {color}; font-weight: bold;")
-            for k, detail in details.items():
-                self.res_eval_labels[k].setText(detail['text'])
-                self.res_eval_labels[k].setStyleSheet(f"color: {detail['color']};")
+
+            if 'ey' in details:
+                self.res_eval_labels['ey'].setText(details['ey']['text'])
+                self.res_eval_labels['ey'].setStyleSheet(f"color: {details['ey']['color']};")
+            if 'roic' in details:
+                self.res_eval_labels['roic'].setText(details['roic']['text'])
+                self.res_eval_labels['roic'].setStyleSheet(f"color: {details['roic']['color']};")
+            if 'ev_ebitda' in details:
+                self.res_eval_labels['ev_ebitda'].setText(details['ev_ebitda']['text'])
+                self.res_eval_labels['ev_ebitda'].setStyleSheet(f"color: {details['ev_ebitda']['color']};")
+
+            # Valutazione Opportunità (Tab 2) con Punteggio
+            opp_score, opp_txt, opp_color, opp_evals = self.evaluator.evaluate_opportunity(pe, ps, peg, ev_eb)
+
+            self.lbl_opp_score.setText(f"{opp_score} / 10")
+            self.lbl_opp_score.setStyleSheet(f"color: {opp_color};")
+            self.lbl_opp_recommendation.setText(opp_txt)
+            self.lbl_opp_recommendation.setStyleSheet(f"color: {opp_color}; font-weight: bold;")
+
+            self.opp_eval_labels['pe'].setText(opp_evals['pe']['text'])
+            self.opp_eval_labels['pe'].setStyleSheet(f"color: {opp_evals['pe']['color']};")
+
+            self.opp_eval_labels['ps'].setText(opp_evals['ps']['text'])
+            self.opp_eval_labels['ps'].setStyleSheet(f"color: {opp_evals['ps']['color']};")
+
+            self.opp_eval_labels['peg'].setText(opp_evals['peg']['text'])
+            self.opp_eval_labels['peg'].setStyleSheet(f"color: {opp_evals['peg']['color']};")
+
+            self.opp_eval_labels['ev_ebitda_occ'].setText(opp_evals['ev_ebitda_occ']['text'])
+            self.opp_eval_labels['ev_ebitda_occ'].setStyleSheet(f"color: {opp_evals['ev_ebitda_occ']['color']};")
+
         else:
             self._reset_results()
 
     def _reset_results(self) -> None:
         for lbl in self.res_labels.values(): lbl.setText("--")
         for lbl in self.res_eval_labels.values(): lbl.setText("")
+        for lbl in self.opp_labels.values(): lbl.setText("--")
+        for lbl in self.opp_eval_labels.values(): lbl.setText("")
+
         self.lbl_score.setText("- / 10")
         self.lbl_score.setStyleSheet("color: #7f8c8d;")
         self.lbl_recommendation.setText("Dati incompleti o errati.")
         self.lbl_recommendation.setStyleSheet("color: #7f8c8d;")
+
+        self.lbl_opp_score.setText("- / 10")
+        self.lbl_opp_score.setStyleSheet("color: #7f8c8d;")
+        self.lbl_opp_recommendation.setText("Dati incompleti o errati.")
+        self.lbl_opp_recommendation.setStyleSheet("color: #7f8c8d;")
 
 
 def main() -> None:
