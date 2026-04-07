@@ -58,6 +58,7 @@ jobs:
         Compression=lzma2
         SolidCompression=yes
         PrivilegesRequired=admin
+        SetupIconFile=icon.ico
 
         [Files]
         Source: "dist\QuantumValue_Analysis\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
