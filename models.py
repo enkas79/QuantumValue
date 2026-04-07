@@ -6,7 +6,6 @@ e l'estrazione dati dalle API (Yahoo Finance, FMP, justetf_scraping).
 Nessuna dipendenza dalla GUI.
 
 Autore: Enrico Martini
-Versione: 0.3.4
 """
 
 import sys

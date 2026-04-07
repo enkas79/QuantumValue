@@ -5,7 +5,6 @@ Contiene classi e funzioni di supporto indipendenti dal dominio,
 come la formattazione dei dati e la gestione globale delle eccezioni.
 
 Autore: Enrico Martini
-Versione: 0.3.4
 """
 
 import traceback

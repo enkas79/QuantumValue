@@ -6,7 +6,6 @@ Questo è il file che dovrai puntare con PyInstaller per creare l'eseguibile:
 comando: pyinstaller --onefile --windowed main.py
 
 Autore: Enrico Martini
-Versione: 0.3.4
 """
 
 import sys

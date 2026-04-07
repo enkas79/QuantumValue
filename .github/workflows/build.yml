@@ -39,12 +39,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install PyQt6 yfinance pandas requests pyinstaller
 
-    # --- AGGIUNTO --add-data PER INCLUDERE version.txt NELL'ESEGUIBILE ---
     - name: Creazione Cartella Eseguibile (PyInstaller)
       run: |
         pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt;." QuantumValue_Analysis.py
 
-    # --- INNO SETUP RICEVE LA VERSIONE DINAMICA ---
+    # --- INNO SETUP RICEVE LA VERSIONE DINAMICA DA POWERSHELL ---
     - name: Creazione script Inno Setup (.iss)
       run: |
         $issContent = @"
@@ -78,6 +77,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: QuantumValue_Installer_v${{ env.VERSION }}
+        # Carica solo il file di installazione finale generato da Inno Setup
         path: Output_Installer/QuantumValue_Analysis_Setup_v${{ env.VERSION }}.exe
 
     # --- CREA LA RELEASE PUBBLICA IN AUTOMATICO ---

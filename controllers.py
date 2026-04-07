@@ -5,7 +5,6 @@ Gestisce tutti i task asincroni interfacciando i Models con la View (GUI)
 in modo da non bloccare mai l'interfaccia utente principale.
 
 Autore: Enrico Martini
-Versione: 0.3.4
 """
 
 from typing import Optional, List, Tuple, Dict, Any

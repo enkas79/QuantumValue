@@ -5,7 +5,6 @@ Contiene esclusivamente le finestre di dialogo e l'interfaccia principale
 (MainWindow), delegando i calcoli ai Models e l'asincronia ai Controllers.
 
 Autore: Enrico Martini
-Versione: 0.3.4
 """
 
 from typing import Optional, Dict, Union, Tuple, List, Any
