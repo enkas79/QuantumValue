@@ -41,7 +41,7 @@ jobs:
 
     - name: Creazione Cartella Eseguibile (PyInstaller)
       run: |
-        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt;." QuantumValue_Analysis.py
+        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --icon=icon.ico --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt;." QuantumValue_Analysis.py
 
     # --- INNO SETUP RICEVE LA VERSIONE DINAMICA DA POWERSHELL ---
     - name: Creazione script Inno Setup (.iss)
