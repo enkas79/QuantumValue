@@ -3,7 +3,13 @@ name: Build QuantumValue Windows Installer
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'version.txt' # Il server partirà SOLO se viene modificato questo file
   workflow_dispatch:
+
+# --- DIAMO AL ROBOT IL PERMESSO DI CREARE LA RELEASE ---
+permissions:
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -15,6 +21,13 @@ jobs:
     steps:
     - name: Checkout del codice
       uses: actions/checkout@v4
+
+    # --- LEGGE LA VERSIONE DA version.txt ---
+    - name: Leggi la versione da version.txt
+      shell: bash
+      run: |
+        VERSION=$(cat version.txt)
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
 
     - name: Installazione Python
       uses: actions/setup-python@v5
@@ -30,17 +43,18 @@ jobs:
       run: |
         pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance QuantumValue_Analysis.py
 
+    # --- INNO SETUP RICEVE LA VERSIONE DINAMICA DA POWERSHELL ---
     - name: Creazione script Inno Setup (.iss)
       run: |
         $issContent = @"
         [Setup]
         AppName=QuantumValue Analysis
-        AppVersion=0.0.26
+        AppVersion=$env:VERSION
         AppPublisher=Enrico Martini
         DefaultDirName={autopf}\QuantumValue Analysis
         DefaultGroupName=QuantumValue Analysis
         OutputDir=Output_Installer
-        OutputBaseFilename=QuantumValue_Analysis_Setup
+        OutputBaseFilename=QuantumValue_Analysis_Setup_v$env:VERSION
         Compression=lzma2
         SolidCompression=yes
         PrivilegesRequired=admin
@@ -58,9 +72,21 @@ jobs:
       run: |
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup_config.iss
 
+    # --- SALVA L'INSTALLER CON IL NUMERO DI VERSIONE NEL NOME ---
     - name: Archiviazione Installer (.exe)
       uses: actions/upload-artifact@v4
       with:
-        name: QuantumValue-Setup
+        name: QuantumValue_Installer_v${{ env.VERSION }}
         # Carica solo il file di installazione finale generato da Inno Setup
-        path: Output_Installer/QuantumValue_Analysis_Setup.exe
+        path: Output_Installer/QuantumValue_Analysis_Setup_v${{ env.VERSION }}.exe
+
+    # --- CREA LA RELEASE PUBBLICA IN AUTOMATICO ---
+    - name: Pubblica la Release su GitHub
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ env.VERSION }}
+        name: QuantumValue Analysis v${{ env.VERSION }}
+        body: "Aggiornamento automatico rilasciato. Scarica l'installer qui sotto per l'ultima versione di QuantumValue!"
+        files: Output_Installer/QuantumValue_Analysis_Setup_v${{ env.VERSION }}.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
