@@ -5,8 +5,11 @@ Contiene esclusivamente le finestre di dialogo e l'interfaccia principale
 (MainWindow), delegando i calcoli ai Models e l'asincronia ai Controllers.
 
 Autore: Enrico Martini
+Versione: Dinamica (via config.py)
 """
 
+import os
+import sys
 from typing import Optional, Dict, Union, Tuple, List, Any
 
 from PyQt6.QtWidgets import (
@@ -15,7 +18,7 @@ from PyQt6.QtWidgets import (
     QDialog, QTextBrowser, QDialogButtonBox, QTableWidget, QRadioButton,
     QTableWidgetItem, QAbstractItemView, QHeaderView, QScrollArea, QTabWidget, QStackedWidget, QApplication
 )
-from PyQt6.QtGui import QAction, QFont, QDesktopServices, QScreen
+from PyQt6.QtGui import QAction, QFont, QDesktopServices, QScreen, QIcon
 from PyQt6.QtCore import Qt, QSettings, QTimer, QUrl
 
 from config import APP_NAME, VERSION, AUTHOR, GITHUB_REPO
@@ -194,7 +197,7 @@ class MainWindow(QMainWindow):
         self.calculator = FinancialCalculator()
         self.fetcher = FinancialDataFetcher(self.fmp_api_key)
         self.evaluator = FinancialEvaluator()
-        
+
         self.etf_fetcher = EtfDataFetcher()
         self.etf_evaluator = EtfEvaluator()
 
@@ -206,7 +209,7 @@ class MainWindow(QMainWindow):
         self.currency_symbol: str = ""
         self.inputs: Dict[str, QLineEdit] = {}
         self.etf_inputs: Dict[str, QLineEdit] = {}
-        
+
         self._init_ui()
         QTimer.singleShot(200, self._check_first_run_setup)
         QTimer.singleShot(1000, lambda: self._check_for_updates(silent=True))
@@ -229,20 +232,27 @@ class MainWindow(QMainWindow):
             screen_geom = screen.availableGeometry()
             w = int(screen_geom.width() * 0.6)
             h = int(screen_geom.height() * 0.72)
-            
+
             w = max(800, min(w, 1100))
             h = max(780, min(h, 920))
-            
+
             self.setFixedSize(w, h)
-            
+
             x = (screen_geom.width() - w) // 2
             y = (screen_geom.height() - h) // 2
             self.move(x, y)
 
     def _init_ui(self) -> None:
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
+
+        # --- Impostazione Dinamica dell'Icona ---
+        base_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.abspath(".")
+        icon_path = os.path.join(base_path, "icon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
         self._center_and_lock_window()
-        
+
         self.setStyleSheet("""
             QMainWindow { background-color: #f0f2f5; }
             QGroupBox { font-weight: bold; border: 1px solid #c8d6e5; border-radius: 6px; margin-top: 10px; background-color: white; }
@@ -254,7 +264,7 @@ class MainWindow(QMainWindow):
         """)
 
         self._create_menu_bar()
-        
+
         central_widget = QWidget()
         main_layout = QVBoxLayout(central_widget)
         self.setCentralWidget(central_widget)
