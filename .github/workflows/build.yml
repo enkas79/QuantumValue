@@ -87,7 +87,7 @@ jobs:
       with:
         tag_name: v${{ env.VERSION }}
         name: QuantumValue Analysis v${{ env.VERSION }}
-        body: "Aggiornamento automatico rilasciato. Scarica l'installer qui sotto per l'ultima versione di QuantumValue!"
+        body: "Aggiornamento rilasciato. Scarica l'ultima versione di QuantumValue!"
         files: Output_Installer/QuantumValue_Analysis_Setup_v${{ env.VERSION }}.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
