@@ -7,6 +7,8 @@ comando: pyinstaller --onefile --windowed main.py
 
 Autore: Enrico Martini
 """
+# comando Windows: pyinstaller --onefile --windowed --add-data "version.txt;." main.py
+# comando macOS/Linux: pyinstaller --onefile --windowed --add-data "version.txt:." main.py
 
 import sys
 import multiprocessing

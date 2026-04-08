@@ -30,7 +30,6 @@ except ImportError:
 
 from config import YAHOO_EXCHANGE_MAP
 
-
 class GitHubUpdateManager:
     """Classe Model per la verifica degli aggiornamenti via API GitHub."""
 
@@ -41,6 +40,12 @@ class GitHubUpdateManager:
         headers: Dict[str, str] = {'Accept': 'application/vnd.github.v3+json'}
         try:
             response = requests.get(api_url, headers=headers, timeout=5)
+
+            # Se il repo è nuovo e non ha ancora Release, GitHub restituisce 404.
+            # Gestiamo la cosa silenziosamente senza lanciare errori.
+            if response.status_code == 404:
+                return False, current_version, ""
+
             response.raise_for_status()
             data: dict = response.json()
             latest_tag: str = data.get('tag_name', '').replace('v', '')
@@ -49,11 +54,21 @@ class GitHubUpdateManager:
             if not latest_tag:
                 return False, current_version, ""
 
-            update_available: bool = latest_tag > current_version.replace('v', '')
-            return update_available, latest_tag, html_url
-        except requests.exceptions.RequestException as e:
-            raise ValueError(f"Impossibile verificare gli aggiornamenti: {str(e)}")
+            # Confronto versioni robusto tramite tuple di interi
+            def parse_version(v: str) -> Tuple[int, ...]:
+                try:
+                    return tuple(map(int, v.split('.')))
+                except ValueError:
+                    return (0, 0, 0)  # Fallback se il tag ha formati strani
 
+            curr_v_clean: str = current_version.replace('v', '')
+            update_available: bool = parse_version(latest_tag) > parse_version(curr_v_clean)
+
+            return update_available, latest_tag, html_url
+
+        except requests.exceptions.RequestException as e:
+            raise ValueError(
+                f"Impossibile verificare gli aggiornamenti. Verifica la connessione o il nome del repo ({repo_path}). Dettaglio: {str(e)}")
 
 class FinancialCalculator:
     """Classe Model per i calcoli delle metriche finanziarie base (Azioni)."""
