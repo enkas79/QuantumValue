@@ -46,7 +46,7 @@ def _load_version() -> str:
 APP_NAME: str = "QuantumValue Analysis"
 VERSION: str = _load_version()
 AUTHOR: str = "Enrico Martini"
-GITHUB_REPO: str = "enkas79/QuantumValueRepo"
+GITHUB_REPO: str = "enkas79/QuantumValue"
 
 # Mappatura delle borse valori usate da Yahoo Finance
 YAHOO_EXCHANGE_MAP: dict[str, str] = {
