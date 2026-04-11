@@ -41,7 +41,7 @@ jobs:
 
     - name: Creazione Cartella Eseguibile (PyInstaller)
       run: |
-        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --icon=icon.ico --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt;." --add-data "icon.ico;." QuantumValue_Analysis.py
+        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --icon=icon.ico --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt;." --add-data "icon.ico;." main.py
 
     - name: Creazione script Inno Setup (.iss)
       run: |
@@ -116,7 +116,7 @@ jobs:
     - name: Creazione Eseguibile Linux (PyInstaller)
       # Nota: Su Linux si usa i due punti ':' per separare i path in --add-data
       run: |
-        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --icon=icon.ico --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt:." --add-data "icon.ico:." QuantumValue_Analysis.py
+        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --icon=icon.ico --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt:." --add-data "icon.ico:." main.py
 
     - name: Impacchettamento nel formato Debian (.deb)
       run: |
