@@ -64,5 +64,5 @@ Non è necessaria alcuna conoscenza di programmazione.
 ### Opzione B: Per Sviluppatori (Esecuzione da Sorgente)
 1. Clona il repository:
    ```bash
-   git clone [https://github.com/enkas79/QuantumValueRepo.git](https://github.com/enkas79/QuantumValueRepo.git)
-   cd QuantumValueRepo
+   git clone [https://github.com/enkas79/QuantumValue.git](https://github.com/enkas79/QuantumValue.git)
+   cd QuantumValue
