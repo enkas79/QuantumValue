@@ -1,4 +1,4 @@
-name: Build QuantumValue Windows Installer
+name: Build QuantumValue (Windows & Linux)
 
 on:
   push:
@@ -7,7 +7,6 @@ on:
       - 'version.txt' # Il server partirà SOLO se viene modificato questo file
   workflow_dispatch:
 
-# --- DIAMO AL ROBOT IL PERMESSO DI CREARE LA RELEASE ---
 permissions:
   contents: write
 
@@ -15,14 +14,15 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build-installer:
+  # ==========================================
+  # JOB 1: BUILD PER WINDOWS (.exe)
+  # ==========================================
+  build-windows:
     runs-on: windows-latest
-
     steps:
     - name: Checkout del codice
       uses: actions/checkout@v4
 
-    # --- LEGGE LA VERSIONE DA version.txt ---
     - name: Leggi la versione da version.txt
       shell: bash
       run: |
@@ -41,9 +41,8 @@ jobs:
 
     - name: Creazione Cartella Eseguibile (PyInstaller)
       run: |
-        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --icon=icon.ico --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt;." QuantumValue_Analysis.py
+        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --icon=icon.ico --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt;." --add-data "icon.ico;." QuantumValue_Analysis.py
 
-    # --- INNO SETUP RICEVE LA VERSIONE DINAMICA DA POWERSHELL ---
     - name: Creazione script Inno Setup (.iss)
       run: |
         $issContent = @"
@@ -64,8 +63,8 @@ jobs:
         Source: "dist\QuantumValue_Analysis\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
         [Icons]
-        Name: "{group}\QuantumValue Analysis"; Filename: "{app}\QuantumValue_Analysis.exe"
-        Name: "{autodesktop}\QuantumValue Analysis"; Filename: "{app}\QuantumValue_Analysis.exe"
+        Name: "{group}\QuantumValue Analysis"; Filename: "{app}\QuantumValue_Analysis.exe"; IconFilename: "{app}\QuantumValue_Analysis.exe"
+        Name: "{autodesktop}\QuantumValue Analysis"; Filename: "{app}\QuantumValue_Analysis.exe"; IconFilename: "{app}\QuantumValue_Analysis.exe"
         "@
         Set-Content -Path "setup_config.iss" -Value $issContent
 
@@ -73,21 +72,101 @@ jobs:
       run: |
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup_config.iss
 
-    # --- SALVA L'INSTALLER CON IL NUMERO DI VERSIONE NEL NOME ---
-    - name: Archiviazione Installer (.exe)
-      uses: actions/upload-artifact@v4
-      with:
-        name: QuantumValue_Installer_v${{ env.VERSION }}
-        # Carica solo il file di installazione finale generato da Inno Setup
-        path: Output_Installer/QuantumValue_Analysis_Setup_v${{ env.VERSION }}.exe
-
-    # --- CREA LA RELEASE PUBBLICA IN AUTOMATICO ---
-    - name: Pubblica la Release su GitHub
+    - name: Pubblica la Release su GitHub (Windows)
       uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ env.VERSION }}
         name: QuantumValue Analysis v${{ env.VERSION }}
-        body: "Aggiornamento rilasciato. Scarica l'ultima versione di QuantumValue!"
+        body: "Aggiornamento rilasciato. Scarica la versione per il tuo sistema operativo!"
         files: Output_Installer/QuantumValue_Analysis_Setup_v${{ env.VERSION }}.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  # ==========================================
+  # JOB 2: BUILD PER LINUX (.deb)
+  # ==========================================
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout del codice
+      uses: actions/checkout@v4
+
+    - name: Leggi la versione da version.txt
+      shell: bash
+      run: |
+        VERSION=$(cat version.txt)
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+    - name: Installazione dipendenze di sistema (Debian/Ubuntu)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y imagemagick dpkg-dev
+
+    - name: Installazione Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Installazione Librerie
+      run: |
+        python -m pip install --upgrade pip
+        pip install PyQt6 yfinance pandas requests pyinstaller
+
+    - name: Creazione Eseguibile Linux (PyInstaller)
+      # Nota: Su Linux si usa i due punti ':' per separare i path in --add-data
+      run: |
+        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis --icon=icon.ico --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt:." --add-data "icon.ico:." QuantumValue_Analysis.py
+
+    - name: Impacchettamento nel formato Debian (.deb)
+      run: |
+        VERSION=${{ env.VERSION }}
+        DEB_DIR="QuantumValue_Analysis_v${VERSION}_amd64"
+        
+        # 1. Crea la struttura delle cartelle standard di Linux
+        mkdir -p $DEB_DIR/DEBIAN
+        mkdir -p $DEB_DIR/opt/QuantumValue
+        mkdir -p $DEB_DIR/usr/share/applications
+        mkdir -p $DEB_DIR/usr/share/icons/hicolor/256x256/apps
+
+        # 2. Copia l'applicazione dentro /opt/
+        cp -r dist/QuantumValue_Analysis/* $DEB_DIR/opt/QuantumValue/
+        chmod +x $DEB_DIR/opt/QuantumValue/QuantumValue_Analysis
+
+        # 3. Crea il file 'control' necessario al package manager APT/dpkg
+        cat <<EOF > $DEB_DIR/DEBIAN/control
+        Package: quantumvalue-analysis
+        Version: ${VERSION}
+        Section: utils
+        Priority: optional
+        Architecture: amd64
+        Maintainer: Enrico Martini
+        Description: QuantumValue Analysis - Analisi Fondamentale e Value Investing.
+        EOF
+
+        # 4. Crea il file .desktop per farlo comparire nel menu delle applicazioni
+        cat <<EOF > $DEB_DIR/usr/share/applications/quantumvalue.desktop
+        [Desktop Entry]
+        Version=${VERSION}
+        Name=QuantumValue Analysis
+        Comment=Analisi Fondamentale e Occasioni in Borsa
+        Exec=/opt/QuantumValue/QuantumValue_Analysis
+        Icon=quantumvalue
+        Terminal=false
+        Type=Application
+        Categories=Finance;Office;
+        EOF
+
+        # 5. Converte l'icona da .ico a .png per renderla visibile nel menu di Linux
+        convert icon.ico[0] -resize 256x256 $DEB_DIR/usr/share/icons/hicolor/256x256/apps/quantumvalue.png || echo "Skipping icon conversion..."
+
+        # 6. Compila finalmente il pacchetto .deb
+        dpkg-deb --build $DEB_DIR
+
+    - name: Pubblica la Release su GitHub (Linux)
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ env.VERSION }}
+        files: QuantumValue_Analysis_v${{ env.VERSION }}_amd64.deb
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
