@@ -8,6 +8,10 @@ Autore: Enrico Martini
 Versione: Dinamica (via config.py)
 """
 
+import utils
+import models
+from controllers import UpdateCheckWorker, SearchWorker, FetchWorker, EtfFetchWorker
+
 import os
 import sys
 from typing import Optional, Dict, Union, Tuple, List, Any
@@ -187,19 +191,19 @@ class InfoDialog(QDialog):
         layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignCenter)
 
 
+# MODIFICA IN views.py (File di grandi dimensioni > 300 righe)
+# ... codice esistente e invariato (GuideDialog, FmpSetupDialog, TickerSearchDialog, InfoDialog) ...
+
+# Modificare preliminarmente le importazioni in cima a views.py come segue:
+# 
 class MainWindow(QMainWindow):
-    """Controller principale e View dell'applicazione base."""
+    """Controller principale e View dell'applicazione base riprogettata con funzioni pure e Thread-Safety."""
     def __init__(self) -> None:
         super().__init__()
         self.settings = QSettings(AUTHOR.replace(" ", ""), APP_NAME.replace(" ", ""))
         self.fmp_api_key: str = str(self.settings.value("fmp_api_key", ""))
 
-        self.calculator = FinancialCalculator()
-        self.fetcher = FinancialDataFetcher(self.fmp_api_key)
-        self.evaluator = FinancialEvaluator()
-
-        self.etf_fetcher = EtfDataFetcher()
-        self.etf_evaluator = EtfEvaluator()
+        self.fetcher = models.FinancialDataFetcher(self.fmp_api_key)
 
         self.fetch_worker: Optional[FetchWorker] = None
         self.search_worker: Optional[SearchWorker] = None
@@ -226,33 +230,22 @@ class MainWindow(QMainWindow):
             self.settings.setValue("fmp_asked_once", True)
 
     def _center_and_lock_window(self) -> None:
-        """Calcola la dimensione fissa in base alla risoluzione e blocca il resize della finestra."""
         screen = QApplication.primaryScreen()
         if screen:
             screen_geom = screen.availableGeometry()
-            w = int(screen_geom.width() * 0.6)
-            h = int(screen_geom.height() * 0.72)
-
-            w = max(800, min(w, 1100))
-            h = max(780, min(h, 920))
-
+            w = max(800, min(int(screen_geom.width() * 0.6), 1100))
+            h = max(780, min(int(screen_geom.height() * 0.72), 920))
             self.setFixedSize(w, h)
-
-            x = (screen_geom.width() - w) // 2
-            y = (screen_geom.height() - h) // 2
-            self.move(x, y)
+            self.move((screen_geom.width() - w) // 2, (screen_geom.height() - h) // 2)
 
     def _init_ui(self) -> None:
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
-
-        # --- Impostazione Dinamica dell'Icona ---
         base_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.abspath(".")
         icon_path = os.path.join(base_path, "icon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
         self._center_and_lock_window()
-
         self.setStyleSheet("""
             QMainWindow { background-color: #f0f2f5; }
             QGroupBox { font-weight: bold; border: 1px solid #c8d6e5; border-radius: 6px; margin-top: 10px; background-color: white; }
@@ -264,7 +257,6 @@ class MainWindow(QMainWindow):
         """)
 
         self._create_menu_bar()
-
         central_widget = QWidget()
         main_layout = QVBoxLayout(central_widget)
         self.setCentralWidget(central_widget)
@@ -275,8 +267,6 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(title_label)
 
         self._create_search_section(main_layout)
-        
-        # Stacked Widget per dividere dinamicamente gli input Azione/ETF
         self.stacked_inputs = QStackedWidget()
         
         self.page_azioni = QWidget()
@@ -286,10 +276,8 @@ class MainWindow(QMainWindow):
         self.page_etf = QWidget()
         self._create_input_section_etf(self.page_etf)
         self.stacked_inputs.addWidget(self.page_etf)
-        
         main_layout.addWidget(self.stacked_inputs)
 
-        # Tab Widget
         self.tabs = QTabWidget()
         self.tab_value = QWidget()
         self.tab_opp = QWidget()
@@ -302,20 +290,16 @@ class MainWindow(QMainWindow):
         self._setup_tab_value(self.tab_value)
         self._setup_tab_opportunity(self.tab_opp)
         self._setup_tab_etf(self.tab_etf)
-        
         main_layout.addWidget(self.tabs, stretch=1)
 
-        # Inizializza visualizzazione Azioni
         self._toggle_asset_mode()
 
-        # Pulsante Uscita ridimensionato
         exit_layout = QHBoxLayout()
         self.btn_exit = QPushButton("Esci dal Programma")
         self.btn_exit.setFixedWidth(200)
         self.btn_exit.setMinimumHeight(40)
         self.btn_exit.setStyleSheet("background-color: #e66767; color: white; padding: 10px; margin-top: 10px;")
         self.btn_exit.clicked.connect(self.close)
-        
         exit_layout.addStretch()
         exit_layout.addWidget(self.btn_exit)
         exit_layout.addStretch()
@@ -330,23 +314,14 @@ class MainWindow(QMainWindow):
         reset_api_action.triggered.connect(self._reset_api_key)
         file_menu.addAction(reset_api_action)
         file_menu.addSeparator()
-        exit_action = QAction("&Esci", self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        file_menu.addAction(QAction("&Esci", self, triggered=self.close))
 
         help_menu = menu_bar.addMenu("&?")
-        update_action = QAction("&Verifica Aggiornamenti", self)
-        update_action.triggered.connect(lambda: self._check_for_updates(silent=False))
-        help_menu.addAction(update_action)
+        help_menu.addAction(QAction("&Verifica Aggiornamenti", self, triggered=lambda: self._check_for_updates(silent=False)))
         help_menu.addSeparator()
-        guide_action = QAction("&Guida Metriche", self)
-        guide_action.triggered.connect(lambda: GuideDialog(self).exec())
-        help_menu.addAction(guide_action)
+        help_menu.addAction(QAction("&Guida Metriche", self, triggered=lambda: GuideDialog(self).exec()))
         help_menu.addSeparator()
-        
-        about_action = QAction("&Info", self)
-        about_action.triggered.connect(lambda: InfoDialog(self).exec())
-        help_menu.addAction(about_action)
+        help_menu.addAction(QAction("&Info", self, triggered=lambda: InfoDialog(self).exec()))
 
     def _reset_api_key(self) -> None:
         self.settings.remove("fmp_api_key")
@@ -356,7 +331,8 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "API Resettata", "Impostazioni ripristinate. Al riavvio verrà richiesta la chiave.")
 
     def _check_for_updates(self, silent: bool = True) -> None:
-        if not silent: self.statusBar().showMessage("Ricerca aggiornamenti su GitHub...")
+        if not silent: 
+            self.statusBar().showMessage("Ricerca aggiornamenti su GitHub...")
         self.update_worker = UpdateCheckWorker(VERSION, GITHUB_REPO, parent=self)
         self.update_worker.finished.connect(lambda u, v, url: self._on_update_checked(u, v, url, silent))
         self.update_worker.error.connect(lambda e: self._on_update_error(e, silent))
@@ -370,26 +346,23 @@ class MainWindow(QMainWindow):
                 f"È disponibile la versione <b>v{new_version}</b>.<br><br>Vuoi andare alla pagina di download?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            # MODIFICATO: Invece di aprire il link diretto di GitHub (download_url),
-            # apriamo l'indirizzo fisso della tua nuova area download sul sito.
             if reply == QMessageBox.StandardButton.Yes:
                 QDesktopServices.openUrl(QUrl("https://mindnetwork.vip/download.php"))
         elif not silent:
             QMessageBox.information(self, "Nessun Aggiornamento", "Stai già utilizzando la versione più recente.")
             self.statusBar().showMessage("Software aggiornato.")
+
     def _on_update_error(self, error_msg: str, silent: bool) -> None:
         if not silent:
             QMessageBox.warning(self, "Errore Aggiornamento", error_msg)
-            self.statusBar().showMessage("Pronto.")
+        self.statusBar().showMessage("Pronto.")
 
     def _create_search_section(self, layout: QVBoxLayout) -> None:
         search_group = QGroupBox("1. Ricerca (Azienda o ETF)")
         search_layout = QHBoxLayout(search_group)
-        
         self.rb_azione = QRadioButton("Azioni")
         self.rb_azione.setChecked(True)
         self.rb_etf = QRadioButton("ETF")
-        
         self.rb_azione.toggled.connect(self._toggle_asset_mode)
         
         search_layout.addWidget(self.rb_azione)
@@ -408,13 +381,11 @@ class MainWindow(QMainWindow):
         self.btn_fetch.setStyleSheet("background-color: #2e86de; color: white; padding: 5px 15px;")
         self.btn_fetch.clicked.connect(self._on_search_requested)
         search_layout.addWidget(self.btn_fetch)
-        
         search_layout.addStretch()
         layout.addWidget(search_group)
 
     def _toggle_asset_mode(self) -> None:
         is_azione = self.rb_azione.isChecked()
-        
         if is_azione:
             self.stacked_inputs.setCurrentWidget(self.page_azioni)
             self.tabs.setTabVisible(0, True)
@@ -452,11 +423,9 @@ class MainWindow(QMainWindow):
 
         var_layout = QHBoxLayout()
         var_layout.setSpacing(15)
-
         self.lbl_var_1d, self.lbl_var_1w, self.lbl_var_1m, self.lbl_var_1y = QLabel("--"), QLabel("--"), QLabel("--"), QLabel("--")
 
-        for lbl_title, lbl_val in [("1D:", self.lbl_var_1d), ("1W:", self.lbl_var_1w),
-                                   ("1M:", self.lbl_var_1m), ("1Y:", self.lbl_var_1y)]:
+        for lbl_title, lbl_val in [("1D:", self.lbl_var_1d), ("1W:", self.lbl_var_1w), ("1M:", self.lbl_var_1m), ("1Y:", self.lbl_var_1y)]:
             var_sublayout = QHBoxLayout()
             var_sublayout.addWidget(QLabel(f"<b>{lbl_title}</b>"))
             var_sublayout.addWidget(lbl_val)
@@ -522,14 +491,12 @@ class MainWindow(QMainWindow):
 
     def _setup_tab_value(self, tab: QWidget) -> None:
         layout = QVBoxLayout(tab)
-        
         metrics_group = QGroupBox("Metriche Analizzate")
         inner_layout = QVBoxLayout(metrics_group)
         self.res_labels: Dict[str, QLabel] = {}
         self.res_eval_labels: Dict[str, QLabel] = {}
         
-        metrics = [('ey', 'Earnings Yield:'), ('roic', 'ROIC:'), ('ev_ebitda', 'EV/EBITDA:')]
-        for key, title in metrics:
+        for key, title in [('ey', 'Earnings Yield:'), ('roic', 'ROIC:'), ('ev_ebitda', 'EV/EBITDA:')]:
             row_layout = QHBoxLayout()
             row_layout.addWidget(QLabel(title))
             lbl_val = QLabel("--")
@@ -539,13 +506,11 @@ class MainWindow(QMainWindow):
             lbl_eval = QLabel("")
             lbl_eval.setAlignment(Qt.AlignmentFlag.AlignRight)
             row_layout.addWidget(lbl_eval)
-            
             self.res_labels[key] = lbl_val
             self.res_eval_labels[key] = lbl_eval
             inner_layout.addLayout(row_layout)
             
         layout.addWidget(metrics_group)
-
         eval_group = QGroupBox("Verdetto Qualità Aziendale")
         eval_layout = QVBoxLayout(eval_group)
         self.lbl_score = QLabel("- / 10")
@@ -561,7 +526,6 @@ class MainWindow(QMainWindow):
 
     def _setup_tab_opportunity(self, tab: QWidget) -> None:
         layout = QVBoxLayout(tab)
-        
         opp_group = QGroupBox("Valutazione Multipli di Mercato")
         inner_layout = QVBoxLayout(opp_group)
         self.opp_labels: Dict[str, QLabel] = {}
@@ -579,13 +543,11 @@ class MainWindow(QMainWindow):
             lbl_eval = QLabel("")
             lbl_eval.setAlignment(Qt.AlignmentFlag.AlignRight)
             row_layout.addWidget(lbl_eval)
-            
             self.opp_labels[key] = lbl_val
             self.opp_eval_labels[key] = lbl_eval
             inner_layout.addLayout(row_layout)
 
         layout.addWidget(opp_group)
-
         eval_opp_group = QGroupBox("Verdetto Occasione in Borsa")
         eval_opp_layout = QVBoxLayout(eval_opp_group)
         self.lbl_opp_score = QLabel("- / 10")
@@ -597,19 +559,16 @@ class MainWindow(QMainWindow):
         eval_opp_layout.addWidget(self.lbl_opp_score)
         eval_opp_layout.addWidget(self.lbl_opp_recommendation)
         layout.addWidget(eval_opp_group)
-        
         layout.addStretch()
 
     def _setup_tab_etf(self, tab: QWidget) -> None:
         layout = QVBoxLayout(tab)
-        
         etf_group = QGroupBox("Analisi Profilo ETF")
         inner_layout = QVBoxLayout(etf_group)
         self.etf_res_labels: Dict[str, QLabel] = {}
         self.etf_eval_labels: Dict[str, QLabel] = {}
 
-        metrics = [('ter', 'Costi TER:'), ('aum', 'Asset Gestiti (AUM):'), ('ret_1y', 'Rendimento Anno:')]
-        for key, title in metrics:
+        for key, title in [('ter', 'Costi TER:'), ('aum', 'Asset Gestiti (AUM):'), ('ret_1y', 'Rendimento Anno:')]:
             row_layout = QHBoxLayout()
             row_layout.addWidget(QLabel(title))
             lbl_val = QLabel("--")
@@ -619,13 +578,11 @@ class MainWindow(QMainWindow):
             lbl_eval = QLabel("")
             lbl_eval.setAlignment(Qt.AlignmentFlag.AlignRight)
             row_layout.addWidget(lbl_eval)
-            
             self.etf_res_labels[key] = lbl_val
             self.etf_eval_labels[key] = lbl_eval
             inner_layout.addLayout(row_layout)
 
         layout.addWidget(etf_group)
-
         eval_etf_group = QGroupBox("Giudizio Strumento Passivo")
         eval_etf_layout = QVBoxLayout(eval_etf_group)
         self.lbl_etf_score = QLabel("- / 10")
@@ -637,13 +594,18 @@ class MainWindow(QMainWindow):
         eval_etf_layout.addWidget(self.lbl_etf_score)
         eval_etf_layout.addWidget(self.lbl_etf_recommendation)
         layout.addWidget(eval_etf_group)
-        
         layout.addStretch()
 
     def _on_search_requested(self) -> None:
+        """Handler protetto contro chiamate concorrenti asincrone multiple."""
         query: str = self.input_ticker.text().strip()
         if not query:
             QMessageBox.warning(self, "Attenzione", "Inserire un Ticker, ISIN o Nome valido.")
+            return
+
+        # Thread Protection Guard
+        if (self.search_worker and self.search_worker.isRunning()) or (self.etf_worker and self.etf_worker.isRunning()):
+            self.statusBar().showMessage("Un'operazione è già in corso. Attendere il completamento...")
             return
 
         self.btn_fetch.setEnabled(False)
@@ -660,7 +622,7 @@ class MainWindow(QMainWindow):
             self.search_worker.start()
         else:
             self.lbl_etf_name.setText("Fondo/ETF: --")
-            self.etf_worker = EtfFetchWorker(self.etf_fetcher, query, parent=self)
+            self.etf_worker = EtfFetchWorker(query, parent=self)
             self.etf_worker.finished.connect(self._on_etf_fetch_success)
             self.etf_worker.error.connect(self._on_etf_fetch_error)
             self.etf_worker.start()
@@ -685,6 +647,8 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Errore Ricerca", error_msg)
 
     def _start_data_fetch(self, ticker: str) -> None:
+        if self.fetch_worker and self.fetch_worker.isRunning():
+            return
         self.btn_fetch.setEnabled(False)
         self.statusBar().showMessage(f"Download dati per {ticker} in corso...")
 
@@ -721,7 +685,7 @@ class MainWindow(QMainWindow):
         for le in self.inputs.values(): le.blockSignals(True)
         for key, value in data.items():
             if key in self.inputs and isinstance(value, float):
-                self.inputs[key].setText(DataFormatter.format_to_string(value))
+                self.inputs[key].setText(utils.format_to_string(value))
         for le in self.inputs.values(): le.blockSignals(False)
 
         self._on_input_changed()
@@ -737,73 +701,72 @@ class MainWindow(QMainWindow):
         try:
             val_data: Dict[str, float] = {}
             for k, e in self.inputs.items():
-                val_data[k] = DataFormatter.parse_to_float(e.text())
+                val_data[k] = utils.parse_to_float(e.text())
 
-            results_core: Dict[str, Union[float, str]] = self.calculator.calculate_metrics(val_data)
+            results_core = models.calculate_metrics(val_data)
             self._display_results(results_core, val_data)
         except ValueError:
             self._reset_results()
 
-    def _display_results(self, results_core: Dict[str, Union[float, str]], raw_data: Dict[str, float]) -> None:
+    def _display_results(self, results_core: Dict[str, Optional[float]], raw_data: Dict[str, float]) -> None:
         ey, roic, ev_eb = results_core.get('ey'), results_core.get('roic'), results_core.get('ev_ebitda')
         pe, ps, peg = raw_data.get('pe', 0.0), raw_data.get('ps', 0.0), raw_data.get('peg', 0.0)
 
-        def set_val_core(k: str, v: Union[float, str], suf: str) -> None:
+        def set_val_core(k: str, v: Optional[float], suf: str) -> None:
             lbl = self.res_labels[k]
-            if isinstance(v, float):
+            if v is not None:
                 lbl.setText(f"{v:.2f}{suf}")
                 lbl.setStyleSheet("color: #222f3e;")
             else:
-                lbl.setText(str(v))
-                lbl.setStyleSheet("color: #e74c3c; font-size: 10px;")
+                lbl.setText("N.D.")
+                lbl.setStyleSheet("color: #e74c3c; font-size: 11px;")
 
-        set_val_core('ey', ey if ey is not None else "", "%")
-        set_val_core('roic', roic if roic is not None else "", "%")
-        set_val_core('ev_ebitda', ev_eb if ev_eb is not None else "", "x")
+        set_val_core('ey', ey, "%")
+        set_val_core('roic', roic, "%")
+        set_val_core('ev_ebitda', ev_eb, "x")
 
-        def set_val_opp(k: str, v: Union[float, str], suf: str) -> None:
+        def set_val_opp(k: str, v: float, suf: str) -> None:
             lbl = self.opp_labels[k]
-            if isinstance(v, float):
+            if v > 0:
                 lbl.setText(f"{v:.2f}{suf}")
                 lbl.setStyleSheet("color: #222f3e;")
             else:
-                lbl.setText(str(v))
-                lbl.setStyleSheet("color: #e74c3c; font-size: 10px;")
+                lbl.setText("N.D.")
+                lbl.setStyleSheet("color: #e74c3c; font-size: 11px;")
 
         set_val_opp('pe', pe, "x")
         set_val_opp('ps', ps, "x")
         set_val_opp('peg', peg, "x")
-        set_val_opp('ev_ebitda_occ', ev_eb if ev_eb is not None else "", "x")
+        
+        lbl_ev_occ = self.opp_labels['ev_ebitda_occ']
+        if ev_eb is not None:
+            lbl_ev_occ.setText(f"{ev_eb:.2f}x")
+            lbl_ev_occ.setStyleSheet("color: #222f3e;")
+        else:
+            lbl_ev_occ.setText("N.D.")
+            lbl_ev_occ.setStyleSheet("color: #e74c3c; font-size: 11px;")
 
-        if isinstance(ey, float) and isinstance(roic, float) and isinstance(ev_eb, float):
-            score, txt, color, details = self.evaluator.evaluate_core(ey, roic, ev_eb)
-            self.lbl_score.setText(f"{score} / 10")
-            self.lbl_score.setStyleSheet(f"color: {color};")
-            self.lbl_recommendation.setText(txt)
-            self.lbl_recommendation.setStyleSheet(f"color: {color}; font-weight: bold;")
+        score, txt, color, details = models.evaluate_core(ey, roic, ev_eb)
+        self.lbl_score.setText(f"{score} / 10")
+        self.lbl_score.setStyleSheet(f"color: {color};")
+        self.lbl_recommendation.setText(txt)
+        self.lbl_recommendation.setStyleSheet(f"color: {color}; font-weight: bold;")
+        
+        for k in ['ey', 'roic', 'ev_ebitda']:
+            if k in details:
+                self.res_eval_labels[k].setText(details[k]['text'])
+                self.res_eval_labels[k].setStyleSheet(f"color: {details[k]['color']};")
             
-            if 'ey' in details:
-                self.res_eval_labels['ey'].setText(details['ey']['text'])
-                self.res_eval_labels['ey'].setStyleSheet(f"color: {details['ey']['color']};")
-            if 'roic' in details:
-                self.res_eval_labels['roic'].setText(details['roic']['text'])
-                self.res_eval_labels['roic'].setStyleSheet(f"color: {details['roic']['color']};")
-            if 'ev_ebitda' in details:
-                self.res_eval_labels['ev_ebitda'].setText(details['ev_ebitda']['text'])
-                self.res_eval_labels['ev_ebitda'].setStyleSheet(f"color: {details['ev_ebitda']['color']};")
-                
-            opp_score, opp_txt, opp_color, opp_evals = self.evaluator.evaluate_opportunity(pe, ps, peg, ev_eb)
-            
-            self.lbl_opp_score.setText(f"{opp_score} / 10")
-            self.lbl_opp_score.setStyleSheet(f"color: {opp_color};")
-            self.lbl_opp_recommendation.setText(opp_txt)
-            self.lbl_opp_recommendation.setStyleSheet(f"color: {opp_color}; font-weight: bold;")
-            
-            for k in ['pe', 'ps', 'peg', 'ev_ebitda_occ']:
+        opp_score, opp_txt, opp_color, opp_evals = models.evaluate_opportunity(pe, ps, peg, ev_eb)
+        self.lbl_opp_score.setText(f"{opp_score} / 10")
+        self.lbl_opp_score.setStyleSheet(f"color: {opp_color};")
+        self.lbl_opp_recommendation.setText(opp_txt)
+        self.lbl_opp_recommendation.setStyleSheet(f"color: {opp_color}; font-weight: bold;")
+        
+        for k in ['pe', 'ps', 'peg', 'ev_ebitda_occ']:
+            if k in opp_evals:
                 self.opp_eval_labels[k].setText(opp_evals[k]['text'])
                 self.opp_eval_labels[k].setStyleSheet(f"color: {opp_evals[k]['color']};")
-        else:
-            self._reset_results()
 
     def _on_etf_fetch_success(self, data: Dict[str, Any]) -> None:
         self.lbl_etf_name.setText(f"Fondo/ETF: {data.pop('company_name', 'N/A')}")
@@ -816,7 +779,7 @@ class MainWindow(QMainWindow):
                 if key == 'aum':
                     self.etf_inputs[key].setText(f"{value:.2f}")
                 else:
-                    self.etf_inputs[key].setText(DataFormatter.format_to_string(value))
+                    self.etf_inputs[key].setText(utils.format_to_string(value))
         for le in self.etf_inputs.values(): le.blockSignals(False)
 
         self._on_etf_input_changed()
@@ -832,7 +795,7 @@ class MainWindow(QMainWindow):
         try:
             val_data: Dict[str, float] = {}
             for k, e in self.etf_inputs.items():
-                val_data[k] = DataFormatter.parse_to_float(e.text())
+                val_data[k] = utils.parse_to_float(e.text())
             self._display_etf_results(val_data)
         except ValueError:
             self._reset_etf_results()
@@ -844,8 +807,7 @@ class MainWindow(QMainWindow):
         self.etf_res_labels['aum'].setText(f"{aum:.2f}M")
         self.etf_res_labels['ret_1y'].setText(f"{ret_1y:.2f}%")
 
-        score, txt, color, details = self.etf_evaluator.evaluate(ter, aum, ret_1y)
-        
+        score, txt, color, details = models.evaluate_etf(ter, aum, ret_1y)
         self.lbl_etf_score.setText(f"{score} / 10")
         self.lbl_etf_score.setStyleSheet(f"color: {color};")
         self.lbl_etf_recommendation.setText(txt)
@@ -861,12 +823,10 @@ class MainWindow(QMainWindow):
         for lbl in self.res_eval_labels.values(): lbl.setText("")
         for lbl in self.opp_labels.values(): lbl.setText("--")
         for lbl in self.opp_eval_labels.values(): lbl.setText("")
-        
         self.lbl_score.setText("- / 10")
         self.lbl_score.setStyleSheet("color: #7f8c8d;")
         self.lbl_recommendation.setText("Dati incompleti o errati.")
         self.lbl_recommendation.setStyleSheet("color: #7f8c8d;")
-        
         self.lbl_opp_score.setText("- / 10")
         self.lbl_opp_score.setStyleSheet("color: #7f8c8d;")
         self.lbl_opp_recommendation.setText("Dati incompleti o errati.")

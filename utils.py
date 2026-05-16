@@ -3,8 +3,10 @@ Modulo Utils (Utility).
 
 Contiene classi e funzioni di supporto indipendenti dal dominio,
 come la formattazione dei dati e la gestione globale delle eccezioni.
+Supporta nativamente l'accesso sia a livello di modulo sia tramite la classe DataFormatter.
 
 Autore: Enrico Martini
+Versione: 0.4.4
 """
 
 import traceback
@@ -22,7 +24,7 @@ except ImportError as e:
 def global_exception_handler(exc_type: type, exc_value: BaseException, exc_tb: Any) -> None:
     """
     Cattura crash imprevisti nel thread principale ed evita la chiusura silenziosa.
-    
+
     Args:
         exc_type (type): Tipo dell'eccezione sollevata.
         exc_value (BaseException): Valore o messaggio dell'eccezione.
@@ -38,61 +40,66 @@ def global_exception_handler(exc_type: type, exc_value: BaseException, exc_tb: A
     msg.exec()
 
 
+def parse_to_float(value_str: str) -> float:
+    """
+    Converte una stringa formattata (es. '1.5M', '3,2B', '5%') in un float.
+
+    Args:
+        value_str (str): Valore stringa da parsare.
+
+    Returns:
+        float: Il valore numerico economico estratto.
+    """
+    clean_str: str = value_str.strip().upper().replace(',', '.').replace('%', '')
+    if not clean_str:
+        raise ValueError("Campo vuoto o non valido.")
+
+    multiplier: float = 1.0
+    if clean_str.endswith('K'):
+        multiplier = 1_000.0
+        clean_str = clean_str[:-1]
+    elif clean_str.endswith('M'):
+        multiplier = 1_000_000.0
+        clean_str = clean_str[:-1]
+    elif clean_str.endswith('B'):
+        multiplier = 1_000_000_000.0
+        clean_str = clean_str[:-1]
+
+    try:
+        return float(clean_str) * multiplier
+    except (ValueError, TypeError):
+        raise ValueError(f"Formato numerico non valido: '{value_str}'.")
+
+
+def format_to_string(value: float) -> str:
+    """
+    Formatta un float in una stringa leggibile standard per l'interfaccia utente.
+
+    Args:
+        value (float): Valore numerico da formattare.
+
+    Returns:
+        str: Valore stringa convertito e localizzato.
+    """
+    try:
+        abs_value: float = abs(value)
+        if abs_value >= 1_000_000_000:
+            formatted: str = f"{value / 1_000_000_000:.2f}B"
+        elif abs_value >= 1_000_000:
+            formatted = f"{value / 1_000_000:.2f}M"
+        elif abs_value >= 1_000:
+            formatted = f"{value / 1_000:.2f}K"
+        else:
+            formatted = f"{value:.2f}"
+        return formatted.replace('.', ',')
+    except (TypeError, ValueError):
+        return "0,00"
+
+
 class DataFormatter:
-    """Classe di supporto per la formattazione e sanitizzazione dei dati numerici."""
-
-    @staticmethod
-    def parse_to_float(value_str: str) -> float:
-        """
-        Converte una stringa formattata (es. '1.5M', '3,2B', '5%') in un float.
-        
-        Args:
-            value_str (str): Valore stringa da parsare.
-            
-        Returns:
-            float: Il valore numerico estratto.
-        """
-        clean_str: str = value_str.strip().upper().replace(',', '.').replace('%', '')
-        if not clean_str:
-            raise ValueError("Campo vuoto o non valido.")
-
-        multiplier: float = 1.0
-        if clean_str.endswith('K'):
-            multiplier = 1_000.0
-            clean_str = clean_str[:-1]
-        elif clean_str.endswith('M'):
-            multiplier = 1_000_000.0
-            clean_str = clean_str[:-1]
-        elif clean_str.endswith('B'):
-            multiplier = 1_000_000_000.0
-            clean_str = clean_str[:-1]
-
-        try:
-            return float(clean_str) * multiplier
-        except (ValueError, TypeError):
-            raise ValueError(f"Formato numerico non valido: '{value_str}'.")
-
-    @staticmethod
-    def format_to_string(value: float) -> str:
-        """
-        Formatta un float in una stringa leggibile per la UI.
-        
-        Args:
-            value (float): Valore da formattare.
-            
-        Returns:
-            str: Valore stringa formattato.
-        """
-        try:
-            abs_value: float = abs(value)
-            if abs_value >= 1_000_000_000:
-                formatted: str = f"{value / 1_000_000_000:.2f}B"
-            elif abs_value >= 1_000_000:
-                formatted = f"{value / 1_000_000:.2f}M"
-            elif abs_value >= 1_000:
-                formatted = f"{value / 1_000:.2f}K"
-            else:
-                formatted = f"{value:.2f}"
-            return formatted.replace('.', ',')
-        except (TypeError, ValueError):
-            return "0,00"
+    """
+    Classe contenitore di supporto mantenuta per garantire la retrocompatibilità
+    con le chiamate dirette legacy presenti all'interno di moduli non sincronizzati.
+    """
+    parse_to_float = staticmethod(parse_to_float)
+    format_to_string = staticmethod(format_to_string)
