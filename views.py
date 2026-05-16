@@ -367,14 +367,16 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Nuovo aggiornamento disponibile: v{new_version}")
             reply = QMessageBox.question(
                 self, "Aggiornamento Disponibile",
-                f"È disponibile la versione <b>v{new_version}</b>.<br><br>Vuoi scaricare il nuovo pacchetto?",
+                f"È disponibile la versione <b>v{new_version}</b>.<br><br>Vuoi andare alla pagina di download?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            if reply == QMessageBox.StandardButton.Yes and download_url: QDesktopServices.openUrl(QUrl(download_url))
+            # MODIFICATO: Invece di aprire il link diretto di GitHub (download_url),
+            # apriamo l'indirizzo fisso della tua nuova area download sul sito.
+            if reply == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl("https://mindnetwork.vip/download.php"))
         elif not silent:
             QMessageBox.information(self, "Nessun Aggiornamento", "Stai già utilizzando la versione più recente.")
             self.statusBar().showMessage("Software aggiornato.")
-
     def _on_update_error(self, error_msg: str, silent: bool) -> None:
         if not silent:
             QMessageBox.warning(self, "Errore Aggiornamento", error_msg)
