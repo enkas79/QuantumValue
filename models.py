@@ -1,13 +1,11 @@
 """
 Modulo Model (Logica di Business).
 
-Contiene le regole matematiche, le valutazioni algoritmiche
-e l'estrazione dati dalle API (Yahoo Finance, FMP).
-Supporta nativamente l'accesso sia tramite funzioni pure di modulo
-sia tramite l'interfaccia a classi legacy per garantire la massima resilienza.
+Contiene le regole matematiche di calcolo finanziario, gli algoritmi di screening
+e l'estrazione dati dai provider. Tutte le classi vuote legacy sono state eliminate.
 
 Autore: Enrico Martini
-Versione: 0.5.0
+Versione: 0.6.0
 """
 
 import sys
@@ -28,9 +26,8 @@ except ImportError:
     JUSTETF_AVAILABLE = False
     print("Avviso: 'justetf_scraping' non installato. Fallback Yahoo Finance per ETF attivo.")
 
-from config import YAHOO_EXCHANGE_MAP
+import config
 
-# Costanti globali per evitare valori magici cablati nel codice operativo
 DEFAULT_EBIT_MARGIN_PROX: float = 0.85
 
 
@@ -46,9 +43,8 @@ def check_for_updates(current_version: str, repo_path: str) -> Tuple[bool, str, 
         Tuple[bool, str, str]: (aggiornamento_disponibile, tag_versione, url_html)
     """
     api_url: str = f"https://api.github.com/repos/{repo_path}/releases/latest"
-    headers: Dict[str, str] = {'Accept': 'application/vnd.github.v3+json'}
     try:
-        response = requests.get(api_url, headers=headers, timeout=5)
+        response = requests.get(api_url, headers=config.HTTP_HEADERS, timeout=config.HTTP_TIMEOUT)
         if response.status_code == 404:
             return False, current_version, ""
         response.raise_for_status()
@@ -75,7 +71,6 @@ def check_for_updates(current_version: str, repo_path: str) -> Tuple[bool, str, 
 def calculate_metrics(data: Dict[str, float]) -> Dict[str, Union[float, str]]:
     """
     Esegue i calcoli finanziari di base partendo da un dizionario di input.
-    Sostituito l'uso di try/except con verifiche preventive (look-ahead validation).
 
     Args:
         data (Dict[str, float]): Dizionario contenente le voci contabili grezze.
@@ -105,7 +100,7 @@ def evaluate_core(
     ev_ebitda: Union[float, str]
 ) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
     """
-    Valuta EY, ROIC e EV/EBITDA proteggendo l'algoritmo tramite pattern matching di tipo.
+    Valuta EY, ROIC e EV/EBITDA classici restituendo un voto globale di qualità.
 
     Args:
         ey (Union[float, str]): Valore o errore dell'Earnings Yield.
@@ -137,7 +132,6 @@ def evaluate_core(
     elif f_ev <= 5: s_ev, t_ev, c_ev = 10, "Molto a Sconto (<=5x)", col_exc
     elif f_ev <= 10: s_ev, t_ev, c_ev = 8, "A Sconto (<=10x)", col_good
     elif f_ev <= 15: s_ev, t_ev, c_ev = 5, "Equo (<=15x)", col_fair
-    elif f_ev <= 20: s_ev, t_ev, c_ev = 3, "Caro (<=20x)", col_weak
     else: s_ev, t_ev, c_ev = 1, "Molto Caro (>20x)", col_bad
 
     avg_score: float = round((s_ey + s_r + s_ev) / 3.0, 1)
@@ -158,18 +152,7 @@ def evaluate_opportunity(
     peg: Union[float, str],
     ev_ebitda: Union[float, str]
 ) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
-    """
-    Valuta i 4 indicatori rapidi di mercato stabilendo il punteggio di convenienza commerciale.
-
-    Args:
-        pe (Union[float, str]): Multiplo Prezzo/Utile.
-        ps (Union[float, str]): Multiplo Prezzo/Fatturato.
-        peg (Union[float, str]): Rapporto PEG.
-        ev_ebitda (Union[float, str]): Multiplo Enterprise Value su EBITDA.
-
-    Returns:
-        Tuple[float, str, str, Dict[str, Dict[str, str]]]: (punteggio, verdetto, colore, mappa_dettagli)
-    """
+    """Valuta i 4 indicatori rapidi di mercato stabilendo il punteggio di convenienza."""
     col_exc, col_fair, col_bad = "#27ae60", "#f39c12", "#c0392b"
     res: Dict[str, Dict[str, str]] = {}
     score: float = 0.0
@@ -211,17 +194,7 @@ def evaluate_opportunity(
 
 
 def evaluate_etf(ter: Union[float, str], aum: Union[float, str], ret: Union[float, str]) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
-    """
-    Assegna i punteggi e la valutazione complessiva di efficienza per gli ETF.
-
-    Args:
-        ter (Union[float, str]): Total Expense Ratio annuale.
-        aum (Union[float, str]): Asset Under Management (in milioni).
-        ret (Union[float, str]): Rendimento ad un anno (%).
-
-    Returns:
-        Tuple[float, str, str, Dict[str, Dict[str, str]]]: (punteggio, verdetto, colore, dettagli)
-    """
+    """Assegna i punteggi e la valutazione complessiva di efficienza per gli ETF."""
     col_exc, col_good, col_fair, col_bad = "#27ae60", "#2ecc71", "#f39c12", "#c0392b"
 
     f_ter: float = float(ter) if isinstance(ter, (int, float)) else -1.0
@@ -256,19 +229,10 @@ def evaluate_etf(ter: Union[float, str], aum: Union[float, str], ret: Union[floa
 
 
 def search_by_name(query: str) -> List[Tuple[str, str, str]]:
-    """
-    Ricerca i ticker azionari ed ETF tramite endpoint pubblico di Yahoo Finance.
-
-    Args:
-        query (str): Testo inserito dall'utente.
-
-    Returns:
-        List[Tuple[str, str, str]]: Lista di tuple contenenti (Simbolo, Nome, Borsa).
-    """
+    """Ricerca i ticker azionari ed ETF tramite endpoint pubblico di Yahoo Finance."""
     url: str = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=10"
-    headers: Dict[str, str] = {'User-Agent': 'Mozilla/5.0'}
     try:
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(url, headers=config.HTTP_HEADERS, timeout=config.HTTP_TIMEOUT)
         response.raise_for_status()
         data: dict = response.json()
         results: List[Tuple[str, str, str]] = []
@@ -278,7 +242,7 @@ def search_by_name(query: str) -> List[Tuple[str, str, str]]:
                 symbol: str = quote.get('symbol', '')
                 name: str = quote.get('shortname', quote.get('longname', 'Sconosciuto'))
                 raw_exchange: str = quote.get('exchange', 'N/A')
-                mapped_exchange: str = YAHOO_EXCHANGE_MAP.get(raw_exchange, raw_exchange)
+                mapped_exchange: str = config.YAHOO_EXCHANGE_MAP.get(raw_exchange, raw_exchange)
                 if symbol:
                     results.append((symbol, name, mapped_exchange))
         return results
@@ -287,15 +251,7 @@ def search_by_name(query: str) -> List[Tuple[str, str, str]]:
 
 
 def fetch_etf_data(query: str) -> Dict[str, Any]:
-    """
-    Scarica i dati analitici dell'ETF indicato interrogando JustETF o Yahoo Finance.
-
-    Args:
-        query (str): Simbolo Ticker o codice ISIN identificativo del fondo.
-
-    Returns:
-        Dict[str, Any]: Mappa delle metriche fondamentali dell'ETF.
-    """
+    """Scarica i dati analitici dell'ETF indicato interrogando JustETF o Yahoo Finance."""
     if not query: raise ValueError("Inserire un ISIN, Ticker o Nome ETF valido.")
 
     if JUSTETF_AVAILABLE:
@@ -346,46 +302,8 @@ def fetch_etf_data(query: str) -> Dict[str, Any]:
         raise ValueError(f"Impossibile trovare i dati dell'ETF tramite i provider: {e}")
 
 
-# --- Classi Contenitore Legacy per Retrocompatibilità Assoluta della UI ---
-
-class GitHubUpdateManager:
-    """Classe di supporto mantenuta per compatibilità legacy."""
-    check_for_updates = staticmethod(check_for_updates)
-
-
-class FinancialCalculator:
-    """Classe di supporto mantenuta per compatibilità legacy."""
-    calculate_metrics = staticmethod(calculate_metrics)
-
-
-class FinancialEvaluator:
-    """Classe di supporto mantenuta per compatibilità legacy."""
-    evaluate_core = staticmethod(evaluate_core)
-    evaluate_opportunity = staticmethod(evaluate_opportunity)
-
-
-class EtfEvaluator:
-    """Classe di supporto mantenuta per compatibilità legacy."""
-    evaluate = staticmethod(evaluate_etf)
-
-
-class TickerSearcher:
-    """Classe di supporto mantenuta per compatibilità legacy."""
-    search_by_name = staticmethod(search_by_name)
-
-
-class EtfDataFetcher:
-    """Classe di supporto mantenuta per compatibilità legacy."""
-    fetch_data = staticmethod(fetch_etf_data)
-
-
 class FinancialDataFetcher:
-    """
-    Classe Model con stato per l'estrazione dei dati azionari dai provider (Yahoo/FMP).
-
-    Args:
-        fmp_api_key (str): Chiave privata per l'autenticazione opzionale su FMP.
-    """
+    """Classe Model con stato per l'estrazione dei dati azionari dai provider (Yahoo/FMP)."""
 
     def __init__(self, fmp_api_key: str = "") -> None:
         self.fmp_api_key: str = fmp_api_key
@@ -463,17 +381,17 @@ class FinancialDataFetcher:
     def _fetch_from_fmp(self, ticker_symbol: str) -> Dict[str, Any]:
         base_url: str = "https://financialmodelingprep.com/api/v3"
         try:
-            prof_resp = requests.get(f"{base_url}/profile/{ticker_symbol}?apikey={self.fmp_api_key}", timeout=10).json()
+            prof_resp = requests.get(f"{base_url}/profile/{ticker_symbol}?apikey={self.fmp_api_key}", timeout=config.HTTP_TIMEOUT).json()
             if not prof_resp: raise ValueError("Azienda non trovata nel database FMP.")
             profile: dict = prof_resp[0]
 
-            km_resp = requests.get(f"{base_url}/key-metrics-ttm/{ticker_symbol}?apikey={self.fmp_api_key}", timeout=10).json()
+            km_resp = requests.get(f"{base_url}/key-metrics-ttm/{ticker_symbol}?apikey={self.fmp_api_key}", timeout=config.HTTP_TIMEOUT).json()
             km: dict = km_resp[0] if km_resp else {}
 
-            ratios_resp = requests.get(f"{base_url}/ratios-ttm/{ticker_symbol}?apikey={self.fmp_api_key}", timeout=10).json()
+            ratios_resp = requests.get(f"{base_url}/ratios-ttm/{ticker_symbol}?apikey={self.fmp_api_key}", timeout=config.HTTP_TIMEOUT).json()
             ratios: dict = ratios_resp[0] if ratios_resp else {}
 
-            inc_resp = requests.get(f"{base_url}/income-statement/{ticker_symbol}?limit=1&apikey={self.fmp_api_key}", timeout=10).json()
+            inc_resp = requests.get(f"{base_url}/income-statement/{ticker_symbol}?limit=1&apikey={self.fmp_api_key}", timeout=config.HTTP_TIMEOUT).json()
             inc: dict = inc_resp[0] if inc_resp else {}
 
             ev: float = float(km.get('enterpriseValueTTM', 0.0) or 0.0)

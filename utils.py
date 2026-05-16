@@ -1,18 +1,16 @@
 """
 Modulo Utils (Utility).
 
-Contiene classi e funzioni di supporto indipendenti dal dominio,
-come la formattazione dei dati e la gestione globale delle eccezioni.
-Supporta nativamente l'accesso sia a livello di modulo sia tramite la classe DataFormatter.
+Contiene funzioni pure di supporto indipendenti dal dominio per la
+formattazione, sanificazione avanzata dei dati e la gestione globale delle eccezioni.
 
 Autore: Enrico Martini
-Versione: 0.5.0
+Versione: 0.6.0
 """
 
 import traceback
 from typing import Any
 
-# Importazione Qt6 per la finestra di errore globale
 try:
     from PyQt6.QtWidgets import QMessageBox
 except ImportError as e:
@@ -42,14 +40,17 @@ def global_exception_handler(exc_type: type, exc_value: BaseException, exc_tb: A
 
 def parse_to_float(value_str: str) -> float:
     """
-    Converte una stringa formattata (es. '1.5M', '3,2B', '5%') in un float.
+    Converte una stringa formattata (inclusi suffissi finanziari e simboli valutari) in un float.
 
     Args:
         value_str (str): Valore stringa da parsare.
 
     Returns:
-        float: Il valore numerico economico estratto.
+        float: Il valore numerico economico estratto e sanificato.
     """
+    for symbol in ('$', '€', '£', ' '):
+        value_str = value_str.replace(symbol, '')
+
     clean_str: str = value_str.strip().upper().replace(',', '.').replace('%', '')
     if not clean_str:
         raise ValueError("Campo vuoto o non valido.")
@@ -79,7 +80,7 @@ def format_to_string(value: float) -> str:
         value (float): Valore numerico da formattare.
 
     Returns:
-        str: Valore stringa convertito e localizzato.
+        str: Valore stringa convertito e localizzato con separatori.
     """
     try:
         abs_value: float = abs(value)
@@ -94,12 +95,3 @@ def format_to_string(value: float) -> str:
         return formatted.replace('.', ',')
     except (TypeError, ValueError):
         return "0,00"
-
-
-class DataFormatter:
-    """
-    Classe contenitore di supporto mantenuta per garantire la retrocompatibilità
-    con le chiamate dirette legacy presenti all'interno di moduli non sincronizzati.
-    """
-    parse_to_float = staticmethod(parse_to_float)
-    format_to_string = staticmethod(format_to_string)

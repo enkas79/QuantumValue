@@ -1,16 +1,12 @@
 """
 Modulo View (Interfaccia Grafica PyQt6).
 
-Contiene esclusivamente le finestre di dialogo e l'interfaccia principale 
+Contiene esclusivamente le finestre di dialogo e l'interfaccia principale
 (MainWindow), delegando i calcoli ai Models e l'asincronia ai Controllers.
 
 Autore: Enrico Martini
 Versione: Dinamica (via config.py)
 """
-
-import utils
-import models
-from controllers import UpdateCheckWorker, SearchWorker, FetchWorker, EtfFetchWorker
 
 import os
 import sys
@@ -25,9 +21,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QAction, QFont, QDesktopServices, QScreen, QIcon
 from PyQt6.QtCore import Qt, QSettings, QTimer, QUrl
 
+# Importazioni corrette dei moduli interni funzionali
+import utils
+import models
 from config import APP_NAME, VERSION, AUTHOR, GITHUB_REPO
-from utils import DataFormatter
-from models import FinancialCalculator, FinancialEvaluator, EtfEvaluator, FinancialDataFetcher, EtfDataFetcher
 from controllers import UpdateCheckWorker, SearchWorker, FetchWorker, EtfFetchWorker
 
 
@@ -190,14 +187,13 @@ class InfoDialog(QDialog):
         btn_close.setFixedWidth(100)
         layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignCenter)
 
-
-# MODIFICA IN views.py (File di grandi dimensioni > 300 righe)
-# ... codice esistente e invariato (GuideDialog, FmpSetupDialog, TickerSearchDialog, InfoDialog) ...
-
-# Modificare preliminarmente le importazioni in cima a views.py come segue:
-# 
 class MainWindow(QMainWindow):
-    """Controller principale e View dell'applicazione base riprogettata con funzioni pure e Thread-Safety."""
+    """
+    Finestra Principale dell'applicazione (View).
+    Completamente disaccoppiata dalle classi contenitore artificiali legacy,
+    interagisce in modo thread-safe e pulito con le funzioni pure dei moduli.
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self.settings = QSettings(AUTHOR.replace(" ", ""), APP_NAME.replace(" ", ""))
@@ -268,11 +264,11 @@ class MainWindow(QMainWindow):
 
         self._create_search_section(main_layout)
         self.stacked_inputs = QStackedWidget()
-        
+
         self.page_azioni = QWidget()
         self._create_input_section_azioni(self.page_azioni)
         self.stacked_inputs.addWidget(self.page_azioni)
-        
+
         self.page_etf = QWidget()
         self._create_input_section_etf(self.page_etf)
         self.stacked_inputs.addWidget(self.page_etf)
@@ -282,11 +278,11 @@ class MainWindow(QMainWindow):
         self.tab_value = QWidget()
         self.tab_opp = QWidget()
         self.tab_etf = QWidget()
-        
+
         self.tabs.addTab(self.tab_value, "Analisi Strutturale Value")
         self.tabs.addTab(self.tab_opp, "Occasioni in Borsa")
         self.tabs.addTab(self.tab_etf, "Valutazione ETF")
-        
+
         self._setup_tab_value(self.tab_value)
         self._setup_tab_opportunity(self.tab_opp)
         self._setup_tab_etf(self.tab_etf)
@@ -317,7 +313,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(QAction("&Esci", self, triggered=self.close))
 
         help_menu = menu_bar.addMenu("&?")
-        help_menu.addAction(QAction("&Verifica Aggiornamenti", self, triggered=lambda: self._check_for_updates(silent=False)))
+        help_menu.addAction(
+            QAction("&Verifica Aggiornamenti", self, triggered=lambda: self._check_for_updates(silent=False)))
         help_menu.addSeparator()
         help_menu.addAction(QAction("&Guida Metriche", self, triggered=lambda: GuideDialog(self).exec()))
         help_menu.addSeparator()
@@ -328,10 +325,11 @@ class MainWindow(QMainWindow):
         self.settings.setValue("fmp_asked_once", False)
         self.fmp_api_key = ""
         self.fetcher.fmp_api_key = ""
-        QMessageBox.information(self, "API Resettata", "Impostazioni ripristinate. Al riavvio verrà richiesta la chiave.")
+        QMessageBox.information(self, "API Resettata",
+                                "Impostazioni ripristinate. Al riavvio verrà richiesta la chiave.")
 
     def _check_for_updates(self, silent: bool = True) -> None:
-        if not silent: 
+        if not silent:
             self.statusBar().showMessage("Ricerca aggiornamenti su GitHub...")
         self.update_worker = UpdateCheckWorker(VERSION, GITHUB_REPO, parent=self)
         self.update_worker.finished.connect(lambda u, v, url: self._on_update_checked(u, v, url, silent))
@@ -364,18 +362,18 @@ class MainWindow(QMainWindow):
         self.rb_azione.setChecked(True)
         self.rb_etf = QRadioButton("ETF")
         self.rb_azione.toggled.connect(self._toggle_asset_mode)
-        
+
         search_layout.addWidget(self.rb_azione)
         search_layout.addWidget(self.rb_etf)
         search_layout.addSpacing(15)
-        
+
         self.input_ticker = QLineEdit()
         self.input_ticker.setPlaceholderText("Es. AAPL (Azione) oppure IE00B4L5Y983 (ETF)...")
         self.input_ticker.setMaximumWidth(320)
         self.input_ticker.textChanged.connect(self._force_uppercase_ticker)
         self.input_ticker.returnPressed.connect(self._on_search_requested)
         search_layout.addWidget(self.input_ticker)
-        
+
         self.btn_fetch = QPushButton(" Cerca/Scarica Dati")
         self.btn_fetch.setMaximumWidth(160)
         self.btn_fetch.setStyleSheet("background-color: #2e86de; color: white; padding: 5px 15px;")
@@ -409,7 +407,7 @@ class MainWindow(QMainWindow):
 
     def _create_input_section_azioni(self, parent: QWidget) -> None:
         layout = QVBoxLayout(parent)
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(0, 0, 0, 0)
         input_group = QGroupBox("2. Dati Finanziari Aziendali & Quotazione")
         grid_layout = QGridLayout(input_group)
 
@@ -423,9 +421,11 @@ class MainWindow(QMainWindow):
 
         var_layout = QHBoxLayout()
         var_layout.setSpacing(15)
-        self.lbl_var_1d, self.lbl_var_1w, self.lbl_var_1m, self.lbl_var_1y = QLabel("--"), QLabel("--"), QLabel("--"), QLabel("--")
+        self.lbl_var_1d, self.lbl_var_1w, self.lbl_var_1m, self.lbl_var_1y = QLabel("--"), QLabel("--"), QLabel(
+            "--"), QLabel("--")
 
-        for lbl_title, lbl_val in [("1D:", self.lbl_var_1d), ("1W:", self.lbl_var_1w), ("1M:", self.lbl_var_1m), ("1Y:", self.lbl_var_1y)]:
+        for lbl_title, lbl_val in [("1D:", self.lbl_var_1d), ("1W:", self.lbl_var_1w), ("1M:", self.lbl_var_1m),
+                                   ("1Y:", self.lbl_var_1y)]:
             var_sublayout = QHBoxLayout()
             var_sublayout.addWidget(QLabel(f"<b>{lbl_title}</b>"))
             var_sublayout.addWidget(lbl_val)
@@ -441,7 +441,7 @@ class MainWindow(QMainWindow):
         grid_layout.setHorizontalSpacing(30)
 
         fields = [
-            ('ebit', 'EBIT:', 2, 0), ('ev', 'EV:', 2, 2), 
+            ('ebit', 'EBIT:', 2, 0), ('ev', 'EV:', 2, 2),
             ('nopat', 'NOPAT:', 3, 0), ('invested_capital', 'Cap. Investito:', 3, 2),
             ('ebitda', 'EBITDA:', 4, 0), ('pe', 'P/E Ratio:', 4, 2),
             ('ps', 'P/S Ratio:', 5, 0), ('peg', 'PEG Ratio:', 5, 2)
@@ -459,14 +459,14 @@ class MainWindow(QMainWindow):
 
     def _create_input_section_etf(self, parent: QWidget) -> None:
         layout = QVBoxLayout(parent)
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(0, 0, 0, 0)
         input_group = QGroupBox("2. Profilo ETF & Composizione")
         grid_layout = QGridLayout(input_group)
 
         self.lbl_etf_name = QLabel("Fondo/ETF: --")
         self.lbl_etf_name.setStyleSheet("color: #8e44ad; font-weight: bold; font-size: 14px;")
         grid_layout.addWidget(self.lbl_etf_name, 0, 0, 1, 5)
-        
+
         self.lbl_etf_repl = QLabel("Replicazione: --")
         self.lbl_etf_repl.setStyleSheet("color: #7f8c8d; font-size: 11px;")
         grid_layout.addWidget(self.lbl_etf_repl, 1, 0, 1, 5)
@@ -475,7 +475,7 @@ class MainWindow(QMainWindow):
         grid_layout.setHorizontalSpacing(30)
 
         fields = [
-            ('ter', 'TER (%):', 2, 0), ('aum', 'AUM (Milioni):', 2, 2), 
+            ('ter', 'TER (%):', 2, 0), ('aum', 'AUM (Milioni):', 2, 2),
             ('ret_1y', 'Rendimento 1Y (%):', 3, 0), ('ret_3y', 'Rendimento 3Y (%):', 3, 2),
         ]
 
@@ -495,7 +495,7 @@ class MainWindow(QMainWindow):
         inner_layout = QVBoxLayout(metrics_group)
         self.res_labels: Dict[str, QLabel] = {}
         self.res_eval_labels: Dict[str, QLabel] = {}
-        
+
         for key, title in [('ey', 'Earnings Yield:'), ('roic', 'ROIC:'), ('ev_ebitda', 'EV/EBITDA:')]:
             row_layout = QHBoxLayout()
             row_layout.addWidget(QLabel(title))
@@ -509,7 +509,7 @@ class MainWindow(QMainWindow):
             self.res_labels[key] = lbl_val
             self.res_eval_labels[key] = lbl_eval
             inner_layout.addLayout(row_layout)
-            
+
         layout.addWidget(metrics_group)
         eval_group = QGroupBox("Verdetto Qualità Aziendale")
         eval_layout = QVBoxLayout(eval_group)
@@ -531,7 +531,7 @@ class MainWindow(QMainWindow):
         self.opp_labels: Dict[str, QLabel] = {}
         self.opp_eval_labels: Dict[str, QLabel] = {}
 
-        metrics = [('pe', 'P/E (Prezzo/Utile):'), ('ps', 'P/S (Prezzo/Ricavi):'), 
+        metrics = [('pe', 'P/E (Prezzo/Utile):'), ('ps', 'P/S (Prezzo/Ricavi):'),
                    ('peg', 'PEG (P/E to Growth):'), ('ev_ebitda_occ', 'EV/EBITDA:')]
         for key, title in metrics:
             row_layout = QHBoxLayout()
@@ -603,7 +603,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Attenzione", "Inserire un Ticker, ISIN o Nome valido.")
             return
 
-        # Thread Protection Guard
         if (self.search_worker and self.search_worker.isRunning()) or (self.etf_worker and self.etf_worker.isRunning()):
             self.statusBar().showMessage("Un'operazione è già in corso. Attendere il completamento...")
             return
@@ -708,17 +707,17 @@ class MainWindow(QMainWindow):
         except ValueError:
             self._reset_results()
 
-    def _display_results(self, results_core: Dict[str, Optional[float]], raw_data: Dict[str, float]) -> None:
-        ey, roic, ev_eb = results_core.get('ey'), results_core.get('roic'), results_core.get('ev_ebitda')
+    def _display_results(self, results_core: Dict[str, Union[float, str]], raw_data: Dict[str, float]) -> None:
+        ey, roic, ev_eb = results_core.get('ey', 0.0), results_core.get('roic', 0.0), results_core.get('ev_ebitda', 0.0)
         pe, ps, peg = raw_data.get('pe', 0.0), raw_data.get('ps', 0.0), raw_data.get('peg', 0.0)
 
-        def set_val_core(k: str, v: Optional[float], suf: str) -> None:
+        def set_val_core(k: str, v: Union[float, str], suf: str) -> None:
             lbl = self.res_labels[k]
-            if v is not None:
+            if isinstance(v, (int, float)):
                 lbl.setText(f"{v:.2f}{suf}")
                 lbl.setStyleSheet("color: #222f3e;")
             else:
-                lbl.setText("N.D.")
+                lbl.setText(str(v))
                 lbl.setStyleSheet("color: #e74c3c; font-size: 11px;")
 
         set_val_core('ey', ey, "%")
@@ -737,9 +736,9 @@ class MainWindow(QMainWindow):
         set_val_opp('pe', pe, "x")
         set_val_opp('ps', ps, "x")
         set_val_opp('peg', peg, "x")
-        
+
         lbl_ev_occ = self.opp_labels['ev_ebitda_occ']
-        if ev_eb is not None:
+        if isinstance(ev_eb, (int, float)):
             lbl_ev_occ.setText(f"{ev_eb:.2f}x")
             lbl_ev_occ.setStyleSheet("color: #222f3e;")
         else:
@@ -751,18 +750,18 @@ class MainWindow(QMainWindow):
         self.lbl_score.setStyleSheet(f"color: {color};")
         self.lbl_recommendation.setText(txt)
         self.lbl_recommendation.setStyleSheet(f"color: {color}; font-weight: bold;")
-        
+
         for k in ['ey', 'roic', 'ev_ebitda']:
             if k in details:
                 self.res_eval_labels[k].setText(details[k]['text'])
                 self.res_eval_labels[k].setStyleSheet(f"color: {details[k]['color']};")
-            
+
         opp_score, opp_txt, opp_color, opp_evals = models.evaluate_opportunity(pe, ps, peg, ev_eb)
         self.lbl_opp_score.setText(f"{opp_score} / 10")
         self.lbl_opp_score.setStyleSheet(f"color: {opp_color};")
         self.lbl_opp_recommendation.setText(opp_txt)
         self.lbl_opp_recommendation.setStyleSheet(f"color: {opp_color}; font-weight: bold;")
-        
+
         for k in ['pe', 'ps', 'peg', 'ev_ebitda_occ']:
             if k in opp_evals:
                 self.opp_eval_labels[k].setText(opp_evals[k]['text'])
@@ -812,7 +811,7 @@ class MainWindow(QMainWindow):
         self.lbl_etf_score.setStyleSheet(f"color: {color};")
         self.lbl_etf_recommendation.setText(txt)
         self.lbl_etf_recommendation.setStyleSheet(f"color: {color}; font-weight: bold;")
-        
+
         for k in ['ter', 'aum', 'ret_1y']:
             if k in details:
                 self.etf_eval_labels[k].setText(details[k]['text'])
