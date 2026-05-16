@@ -7,7 +7,7 @@ Supporta nativamente l'accesso sia tramite funzioni pure di modulo
 sia tramite l'interfaccia a classi legacy per garantire la massima resilienza.
 
 Autore: Enrico Martini
-Versione: 0.4.4
+Versione: 0.5.0
 """
 
 import sys
@@ -35,7 +35,16 @@ DEFAULT_EBIT_MARGIN_PROX: float = 0.85
 
 
 def check_for_updates(current_version: str, repo_path: str) -> Tuple[bool, str, str]:
-    """Verifica la presenza di una nuova release su GitHub via API pubblica."""
+    """
+    Verifica la presenza di una nuova release su GitHub via API pubblica.
+
+    Args:
+        current_version (str): Versione attuale dell'applicazione.
+        repo_path (str): Path del repository GitHub (es. 'utente/repo').
+
+    Returns:
+        Tuple[bool, str, str]: (aggiornamento_disponibile, tag_versione, url_html)
+    """
     api_url: str = f"https://api.github.com/repos/{repo_path}/releases/latest"
     headers: Dict[str, str] = {'Accept': 'application/vnd.github.v3+json'}
     try:
@@ -64,43 +73,53 @@ def check_for_updates(current_version: str, repo_path: str) -> Tuple[bool, str, 
 
 
 def calculate_metrics(data: Dict[str, float]) -> Dict[str, Union[float, str]]:
-    """Esegue i calcoli finanziari di base partendo da un dizionario di input."""
+    """
+    Esegue i calcoli finanziari di base partendo da un dizionario di input.
+    Sostituito l'uso di try/except con verifiche preventive (look-ahead validation).
+
+    Args:
+        data (Dict[str, float]): Dizionario contenente le voci contabili grezze.
+
+    Returns:
+        Dict[str, Union[float, str]]: Metriche calcolate o messaggi di errore strutturati.
+    """
     results: Dict[str, Union[float, str]] = {}
-    try:
-        ev_val: float = data.get('ev', 0.0)
-        ebit_val: float = data.get('ebit', 0.0)
-        results['ey'] = (ebit_val / ev_val) * 100 if ev_val != 0.0 else "Err(EV=0)"
-    except (ZeroDivisionError, TypeError):
-        results['ey'] = "Errore"
 
-    try:
-        inv_cap: float = data.get('invested_capital', 0.0)
-        nopat_val: float = data.get('nopat', 0.0)
-        results['roic'] = (nopat_val / inv_cap) * 100 if inv_cap != 0.0 else "Err(Cap=0)"
-    except (ZeroDivisionError, TypeError):
-        results['roic'] = "Errore"
+    ev_val: float = data.get('ev', 0.0)
+    ebit_val: float = data.get('ebit', 0.0)
+    results['ey'] = (ebit_val / ev_val) * 100 if ev_val != 0.0 else "Err(EV=0)"
 
-    try:
-        ebitda_val: float = data.get('ebitda', 0.0)
-        results['ev_ebitda'] = ev_val / ebitda_val if ebitda_val != 0.0 else "Err(EBITDA=0)"
-    except (ZeroDivisionError, TypeError):
-        results['ev_ebitda'] = "Errore"
+    inv_cap: float = data.get('invested_capital', 0.0)
+    nopat_val: float = data.get('nopat', 0.0)
+    results['roic'] = (nopat_val / inv_cap) * 100 if inv_cap != 0.0 else "Err(Cap=0)"
+
+    ebitda_val: float = data.get('ebitda', 0.0)
+    results['ev_ebitda'] = ev_val / ebitda_val if ebitda_val != 0.0 else "Err(EBITDA=0)"
 
     return results
 
 
-def evaluate_core(ey: Any, roic: Any, ev_ebitda: Any) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
-    """Valuta EY, ROIC e EV/EBITDA proteggendo l'algoritmo da stringhe di errore impreviste."""
+def evaluate_core(
+    ey: Union[float, str],
+    roic: Union[float, str],
+    ev_ebitda: Union[float, str]
+) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
+    """
+    Valuta EY, ROIC e EV/EBITDA proteggendo l'algoritmo tramite pattern matching di tipo.
+
+    Args:
+        ey (Union[float, str]): Valore o errore dell'Earnings Yield.
+        roic (Union[float, str]): Valore o errore del Return on Invested Capital.
+        ev_ebitda (Union[float, str]): Valore o errore del multiplo EV/EBITDA.
+
+    Returns:
+        Tuple[float, str, str, Dict[str, Dict[str, str]]]: (punteggio, verdetto, colore, dettagli)
+    """
     col_exc, col_good, col_fair, col_weak, col_bad = "#27ae60", "#2ecc71", "#f39c12", "#d35400", "#c0392b"
 
-    try: f_ey = float(ey)
-    except (ValueError, TypeError): f_ey = -999.0
-
-    try: f_roic = float(roic)
-    except (ValueError, TypeError): f_roic = -999.0
-
-    try: f_ev = float(ev_ebitda)
-    except (ValueError, TypeError): f_ev = 999.0
+    f_ey: float = float(ey) if isinstance(ey, (int, float)) else -999.0
+    f_roic: float = float(roic) if isinstance(roic, (int, float)) else -999.0
+    f_ev: float = float(ev_ebitda) if isinstance(ev_ebitda, (int, float)) else 999.0
 
     if f_ey >= 10: s_ey, t_ey, c_ey = 10, "Eccellente (>=10%)", col_exc
     elif f_ey >= 6: s_ey, t_ey, c_ey = 8, "Buono (>=6%)", col_good
@@ -133,23 +152,32 @@ def evaluate_core(ey: Any, roic: Any, ev_ebitda: Any) -> Tuple[float, str, str, 
     else: return avg_score, "LASCIAR PERDERE (Avoid)", col_bad, details
 
 
-def evaluate_opportunity(pe: Any, ps: Any, peg: Any, ev_ebitda: Any) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
-    """Valuta i 4 indicatori per le 'Occasioni in Borsa' fornendo un punteggio su 10 e un verdetto."""
+def evaluate_opportunity(
+    pe: Union[float, str],
+    ps: Union[float, str],
+    peg: Union[float, str],
+    ev_ebitda: Union[float, str]
+) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
+    """
+    Valuta i 4 indicatori rapidi di mercato stabilendo il punteggio di convenienza commerciale.
+
+    Args:
+        pe (Union[float, str]): Multiplo Prezzo/Utile.
+        ps (Union[float, str]): Multiplo Prezzo/Fatturato.
+        peg (Union[float, str]): Rapporto PEG.
+        ev_ebitda (Union[float, str]): Multiplo Enterprise Value su EBITDA.
+
+    Returns:
+        Tuple[float, str, str, Dict[str, Dict[str, str]]]: (punteggio, verdetto, colore, mappa_dettagli)
+    """
     col_exc, col_fair, col_bad = "#27ae60", "#f39c12", "#c0392b"
     res: Dict[str, Dict[str, str]] = {}
     score: float = 0.0
 
-    try: f_pe = float(pe)
-    except (ValueError, TypeError): f_pe = -1.0
-
-    try: f_ps = float(ps)
-    except (ValueError, TypeError): f_ps = -1.0
-
-    try: f_peg = float(peg)
-    except (ValueError, TypeError): f_peg = -1.0
-
-    try: f_ev = float(ev_ebitda)
-    except (ValueError, TypeError): f_ev = -1.0
+    f_pe: float = float(pe) if isinstance(pe, (int, float)) else -1.0
+    f_ps: float = float(ps) if isinstance(ps, (int, float)) else -1.0
+    f_peg: float = float(peg) if isinstance(peg, (int, float)) else -1.0
+    f_ev: float = float(ev_ebitda) if isinstance(ev_ebitda, (int, float)) else -1.0
 
     if 0 < f_pe < 20: s_pe, t_pe, c_pe = 2.5, "Ideale (< 20)", col_exc
     elif f_pe <= 0: s_pe, t_pe, c_pe = 0.0, "Negativo (Attenzione)", col_bad
@@ -182,18 +210,23 @@ def evaluate_opportunity(pe: Any, ps: Any, peg: Any, ev_ebitda: Any) -> Tuple[fl
     return score, verdict, v_color, res
 
 
-def evaluate_etf(ter: Any, aum: Any, ret: Any) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
-    """Assegna i punteggi e la valutazione complessiva di efficienza per gli ETF."""
+def evaluate_etf(ter: Union[float, str], aum: Union[float, str], ret: Union[float, str]) -> Tuple[float, str, str, Dict[str, Dict[str, str]]]:
+    """
+    Assegna i punteggi e la valutazione complessiva di efficienza per gli ETF.
+
+    Args:
+        ter (Union[float, str]): Total Expense Ratio annuale.
+        aum (Union[float, str]): Asset Under Management (in milioni).
+        ret (Union[float, str]): Rendimento ad un anno (%).
+
+    Returns:
+        Tuple[float, str, str, Dict[str, Dict[str, str]]]: (punteggio, verdetto, colore, dettagli)
+    """
     col_exc, col_good, col_fair, col_bad = "#27ae60", "#2ecc71", "#f39c12", "#c0392b"
 
-    try: f_ter = float(ter)
-    except (ValueError, TypeError): f_ter = -1.0
-
-    try: f_aum = float(aum)
-    except (ValueError, TypeError): f_aum = -1.0
-
-    try: f_ret = float(ret)
-    except (ValueError, TypeError): f_ret = -999.0
+    f_ter: float = float(ter) if isinstance(ter, (int, float)) else -1.0
+    f_aum: float = float(aum) if isinstance(aum, (int, float)) else -1.0
+    f_ret: float = float(ret) if isinstance(ret, (int, float)) else -999.0
 
     if 0 <= f_ter <= 0.20: s_ter, t_ter, c_ter = 10, "Eccellente (<= 0.20%)", col_exc
     elif f_ter <= 0.40: s_ter, t_ter, c_ter = 8, "Buono (<= 0.40%)", col_good
@@ -223,7 +256,15 @@ def evaluate_etf(ter: Any, aum: Any, ret: Any) -> Tuple[float, str, str, Dict[st
 
 
 def search_by_name(query: str) -> List[Tuple[str, str, str]]:
-    """Ricerca i ticker tramite Yahoo Finance."""
+    """
+    Ricerca i ticker azionari ed ETF tramite endpoint pubblico di Yahoo Finance.
+
+    Args:
+        query (str): Testo inserito dall'utente.
+
+    Returns:
+        List[Tuple[str, str, str]]: Lista di tuple contenenti (Simbolo, Nome, Borsa).
+    """
     url: str = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=10"
     headers: Dict[str, str] = {'User-Agent': 'Mozilla/5.0'}
     try:
@@ -246,7 +287,15 @@ def search_by_name(query: str) -> List[Tuple[str, str, str]]:
 
 
 def fetch_etf_data(query: str) -> Dict[str, Any]:
-    """Scarica i dati analitici dell'ETF indicato."""
+    """
+    Scarica i dati analitici dell'ETF indicato interrogando JustETF o Yahoo Finance.
+
+    Args:
+        query (str): Simbolo Ticker o codice ISIN identificativo del fondo.
+
+    Returns:
+        Dict[str, Any]: Mappa delle metriche fondamentali dell'ETF.
+    """
     if not query: raise ValueError("Inserire un ISIN, Ticker o Nome ETF valido.")
 
     if JUSTETF_AVAILABLE:
@@ -331,7 +380,12 @@ class EtfDataFetcher:
 
 
 class FinancialDataFetcher:
-    """Classe Model con stato per l'estrazione dei dati azionari dai provider (Yahoo/FMP)."""
+    """
+    Classe Model con stato per l'estrazione dei dati azionari dai provider (Yahoo/FMP).
+
+    Args:
+        fmp_api_key (str): Chiave privata per l'autenticazione opzionale su FMP.
+    """
 
     def __init__(self, fmp_api_key: str = "") -> None:
         self.fmp_api_key: str = fmp_api_key

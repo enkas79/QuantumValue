@@ -6,7 +6,7 @@ come la formattazione dei dati e la gestione globale delle eccezioni.
 Supporta nativamente l'accesso sia a livello di modulo sia tramite la classe DataFormatter.
 
 Autore: Enrico Martini
-Versione: 0.4.4
+Versione: 0.5.0
 """
 
 import traceback
