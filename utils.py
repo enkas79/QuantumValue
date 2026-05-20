@@ -2,16 +2,18 @@
 Modulo Utils (Utility).
 
 Contiene funzioni pure di supporto, gestione globale delle eccezioni
-e inizializzazione del sistema di logging accoppiato su file.
+e inizializzazione del sistema di logging accoppiato su file in area sicura.
 
 Autore: Enrico Martini
-Versione: 0.6.3
+Versione: 0.6.4
 """
 
+import os
 import traceback
 import sys
 import logging
 import threading
+import tempfile
 from typing import Any
 
 try:
@@ -27,11 +29,22 @@ logger = logging.getLogger("QuantumValue")
 
 def setup_logging() -> None:
     """
-    Inizializza il file log di debug locale con flushing immediato
-    e aggancia i gestori di eccezione nativi di Python.
+    Inizializza il file log di debug locale in una directory con permessi garantiti
+    (Home dell'utente) e aggancia i gestori di eccezione nativi di Python.
     """
+    # Determina un percorso sicuro dove l'utente ha i permessi di scrittura
+    user_home: str = os.path.expanduser("~")
+    log_dir: str = os.path.join(user_home, ".quantumvalue")
+
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        log_path: str = os.path.join(log_dir, "quantumvalue_debug.log")
+    except Exception:
+        # Fallback assoluto: usa la cartella dei file temporanei di sistema
+        log_path = os.path.join(tempfile.gettempdir(), "quantumvalue_debug.log")
+
     logging.basicConfig(
-        filename="quantumvalue_debug.log",
+        filename=log_path,
         filemode="w",  # Sovrascrive il file ad ogni avvio per pulizia sequenziale
         format="%(asctime)s [%(levelname)s] %(threadName)s: %(message)s",
         level=logging.DEBUG
@@ -43,7 +56,8 @@ def setup_logging() -> None:
     # Aggancia il gestore per i thread di background (es. yfinance o QThreads)
     threading.excepthook = threading_exception_handler
 
-    logger.info("Sistema di tracciamento e logging inizializzato. Versione applicazione: 0.6.3")
+    logger.info(f"Sistema di logging inizializzato in: {log_path}")
+    logger.info("Versione applicazione: 0.6.4")
 
 
 def global_exception_handler(exc_type: type, exc_value: BaseException, exc_tb: Any) -> None:
