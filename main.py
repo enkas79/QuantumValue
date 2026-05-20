@@ -1,12 +1,12 @@
 """
 Entry Point (Punto di Avvio).
 
-Inizializza la QApplication e carica la finestra principale.
+Inizializza la QApplication, attiva il logging e carica la finestra principale.
 Questo è il file che dovrai puntare con PyInstaller per creare l'eseguibile:
 comando: pyinstaller --onefile --windowed main.py
 
 Autore: Enrico Martini
-Versione: 0.6.2
+Versione: 0.6.3
 """
 # comando Windows: pyinstaller --onefile --windowed --add-data "version.txt;." main.py
 # comando macOS/Linux: pyinstaller --onefile --windowed --add-data "version.txt:." main.py
@@ -15,17 +15,17 @@ import sys
 import multiprocessing
 from typing import Any
 
-# --- PROTEZIONE CRITICA PER PYINSTALLER --WINDOWED SU WINDOWS ---
+
 class DummyStream:
     """Stream vuoto per prevenire crash su stampe o log di librerie terze."""
     def write(self, *args: Any, **kwargs: Any) -> None: pass
     def flush(self, *args: Any, **kwargs: Any) -> None: pass
 
+
 if sys.stdout is None:
     sys.stdout = DummyStream()
 if sys.stderr is None:
     sys.stderr = DummyStream()
-# ----------------------------------------------------------------
 
 # Importazioni di PyQt6 strettamente necessarie per l'avvio
 try:
@@ -34,18 +34,18 @@ except ImportError as e:
     print(f"Errore: PyQt6 non trovato. Eseguire 'pip install PyQt6'.\nDettagli: {e}")
     sys.exit(1)
 
-from utils import global_exception_handler
+import utils
 from views import MainWindow
 
 
 def main() -> None:
     """Funzione principale che esegue l'applicazione MVC."""
-    
+
+    # Inizializza immediatamente la diagnostica su file e gli hook di sistema
+    utils.setup_logging()
+
     # Necessario per la corretta compilazione multi-thread di PyInstaller
     multiprocessing.freeze_support()
-    
-    # Inizializza l'handler globale per evitare la chiusura silenziosa
-    sys.excepthook = global_exception_handler
     
     # Crea e avvia l'applicazione PyQt6
     app = QApplication(sys.argv)

@@ -627,21 +627,34 @@ class MainWindow(QMainWindow):
             self.etf_worker.start()
 
     def _on_search_success(self, results: List[Tuple[str, str, str]], query: str) -> None:
-        self.btn_fetch.setEnabled(True)
-        if not results:
-            QMessageBox.warning(self, "Nessun Risultato", f"Nessuna corrispondenza per '{query}'.")
-            return
+        import logging
+        import traceback
+        logger = logging.getLogger("QuantumValue")
+        logger.info(f"Ricerca completata per '{query}'. Risultati grezzi ottenuti: {len(results)}")
 
-        exact_match = next((res for res in results if res[0].upper() == query.upper()), None)
-        if exact_match:
-            self._start_data_fetch(exact_match[0])
-        else:
-            dialog = TickerSearchDialog(results, self)
-            result_code = dialog.exec()
-            # Accetta sia la rappresentazione interna numerica (1) che l'oggetto Enum PyQt6
-            if (result_code == 1 or result_code == QDialog.DialogCode.Accepted) and dialog.selected_ticker:
-                self.input_ticker.setText(dialog.selected_ticker)
-                self._start_data_fetch(dialog.selected_ticker)
+        try:
+            self.btn_fetch.setEnabled(True)
+            if not results:
+                QMessageBox.warning(self, "Nessun Risultato", f"Nessuna corrispondenza per '{query}'.")
+                return
+
+            exact_match = next((res for res in results if res[0].upper() == query.upper()), None)
+            if exact_match:
+                logger.info(f"Match esatto individuato per '{exact_match[0]}'. Avvio estrazione fondamentali...")
+                self._start_data_fetch(exact_match[0])
+            else:
+                logger.info("Nessun match esatto. Apertura della finestra di selezione TickerSearchDialog...")
+                dialog = TickerSearchDialog(results, self)
+                result_code = dialog.exec()
+                if (result_code == 1 or result_code == QDialog.DialogCode.Accepted) and dialog.selected_ticker:
+                    logger.info(f"Ticker '{dialog.selected_ticker}' selezionato manualmente dall'utente.")
+                    self.input_ticker.setText(dialog.selected_ticker)
+                    self._start_data_fetch(dialog.selected_ticker)
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            logger.error(f"Eccezione intercettata in _on_search_success nel thread GUI:\n{error_trace}")
+            QMessageBox.critical(self, "Errore Ricerca Interna",
+                                 f"Errore nell'elaborazione grafica dei risultati:\n{str(e)}")
 
     def _on_search_error(self, error_msg: str) -> None:
         self.btn_fetch.setEnabled(True)
@@ -659,46 +672,66 @@ class MainWindow(QMainWindow):
         self.fetch_worker.start()
 
     def _on_fetch_success(self, data: Dict[str, Any]) -> None:
-        self.lbl_company_name.setText(f"Azienda: {data.pop('company_name', 'N/A')}")
-        self.currency_symbol = data.pop('currency', '$')
+        import logging
+        import traceback
+        logger = logging.getLogger("QuantumValue")
+        logger.info("Worker di background terminato. Ricezione dizionario dati fondamentali avviata.")
 
-        prices: Dict[str, float] = data.pop('prices', {})
-        curr: float = prices.get('current', 0.0)
-        self.lbl_price.setText(f"Prezzo: {curr:.2f} {self.currency_symbol}")
+        try:
+            self.lbl_company_name.setText(f"Azienda: {data.pop('company_name', 'N/A')}")
+            self.currency_symbol = data.pop('currency', '$')
 
-        def set_variation_label(lbl: QLabel, current: float, past: float) -> None:
-            if past > 0 and past != current:
-                diff: float = current - past
-                pct: float = (diff / past) * 100
-                color: str = "#27ae60" if diff >= 0 else "#c0392b"
-                sign: str = "+" if diff >= 0 else ""
-                lbl.setText(f"({sign}{pct:.2f}%)")
-                lbl.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 11px;")
-            else:
-                lbl.setText("--")
-                lbl.setStyleSheet("color: #7f8c8d;")
+            prices: Dict[str, float] = data.pop('prices', {})
+            curr: float = prices.get('current', 0.0)
+            self.lbl_price.setText(f"Prezzo: {curr:.2f} {self.currency_symbol}")
 
-        set_variation_label(self.lbl_var_1d, curr, prices.get('1d', curr))
-        set_variation_label(self.lbl_var_1w, curr, prices.get('1w', curr))
-        set_variation_label(self.lbl_var_1m, curr, prices.get('1m', curr))
-        set_variation_label(self.lbl_var_1y, curr, prices.get('1y', curr))
+            def set_variation_label(lbl: QLabel, current: float, past: float) -> None:
+                if past > 0 and past != current:
+                    diff: float = current - past
+                    pct: float = (diff / past) * 100
+                    color: str = "#27ae60" if diff >= 0 else "#c0392b"
+                    sign: str = "+" if diff >= 0 else ""
+                    lbl.setText(f"({sign}{pct:.2f}%)")
+                    lbl.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 11px;")
+                else:
+                    lbl.setText("--")
+                    lbl.setStyleSheet("color: #7f8c8d;")
 
-        for le in self.inputs.values(): le.blockSignals(True)
-        for key, value in data.items():
-            if key in self.inputs and isinstance(value, float):
-                self.inputs[key].setText(utils.format_to_string(value))
-        for le in self.inputs.values(): le.blockSignals(False)
+            set_variation_label(self.lbl_var_1d, curr, prices.get('1d', curr))
+            set_variation_label(self.lbl_var_1w, curr, prices.get('1w', curr))
+            set_variation_label(self.lbl_var_1m, curr, prices.get('1m', curr))
+            set_variation_label(self.lbl_var_1y, curr, prices.get('1y', curr))
 
-        self._on_input_changed()
-        self.btn_fetch.setEnabled(True)
-        self.statusBar().showMessage("Dati scaricati e processati con successo.")
+            logger.debug("Iniezione dei valori numerici all'interno delle QLineEdit della maschera.")
+            for le in self.inputs.values(): le.blockSignals(True)
+            for key, value in data.items():
+                if key in self.inputs and (isinstance(value, float) or isinstance(value, int)):
+                    self.inputs[key].setText(utils.format_to_string(float(value)))
+            for le in self.inputs.values(): le.blockSignals(False)
+
+            logger.debug("Chiamata al ricalcolo delle metriche di screening (_on_input_changed).")
+            self._on_input_changed()
+            self.btn_fetch.setEnabled(True)
+            self.statusBar().showMessage("Dati scaricati e processati con successo.")
+            logger.info("Rendering dell'interfaccia azionaria completato con totale successo.")
+
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            logger.error(f"Crash bloccato durante il popolamento dell'interfaccia azionaria:\n{error_trace}")
+            self.btn_fetch.setEnabled(True)
+            QMessageBox.critical(self, "Errore Aggiornamento Grafico",
+                                 f"I dati estratti hanno causato un conflitto con i widget:\n{str(e)}")
 
     def _on_fetch_error(self, error_msg: str) -> None:
         self.btn_fetch.setEnabled(True)
         self.statusBar().showMessage("Errore durante il download.")
-        QMessageBox.critical(self, "Errore Dati", error_msg)
+        QMessageBox.warning(self, "Errore Dati", error_msg)
 
     def _on_input_changed(self, *args: Any) -> None:
+        import logging
+        import traceback
+        logger = logging.getLogger("QuantumValue")
+
         try:
             val_data: Dict[str, float] = {}
             for k, e in self.inputs.items():
@@ -707,6 +740,10 @@ class MainWindow(QMainWindow):
             results_core = models.calculate_metrics(val_data)
             self._display_results(results_core, val_data)
         except ValueError:
+            self._reset_results()
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            logger.error(f"Errore generico silenziato durante il calcolo dinamico delle formule:\n{error_trace}")
             self._reset_results()
 
     def _display_results(self, results_core: Dict[str, Union[float, str]], raw_data: Dict[str, float]) -> None:
@@ -770,22 +807,36 @@ class MainWindow(QMainWindow):
                 self.opp_eval_labels[k].setStyleSheet(f"color: {opp_evals[k]['color']};")
 
     def _on_etf_fetch_success(self, data: Dict[str, Any]) -> None:
-        self.lbl_etf_name.setText(f"Fondo/ETF: {data.pop('company_name', 'N/A')}")
-        self.lbl_etf_repl.setText(f"Replicazione: {data.pop('replication', 'N/A')}")
-        self.currency_symbol = data.pop('currency', 'EUR')
+        import logging
+        import traceback
+        logger = logging.getLogger("QuantumValue")
+        logger.info("Dati ETF ricevuti dal Worker di background.")
 
-        for le in self.etf_inputs.values(): le.blockSignals(True)
-        for key, value in data.items():
-            if key in self.etf_inputs and isinstance(value, float):
-                if key == 'aum':
-                    self.etf_inputs[key].setText(f"{value:.2f}")
-                else:
-                    self.etf_inputs[key].setText(utils.format_to_string(value))
-        for le in self.etf_inputs.values(): le.blockSignals(False)
+        try:
+            self.lbl_etf_name.setText(f"Fondo/ETF: {data.pop('company_name', 'N/A')}")
+            self.lbl_etf_repl.setText(f"Replicazione: {data.pop('replication', 'N/A')}")
+            self.currency_symbol = data.pop('currency', 'EUR')
 
-        self._on_etf_input_changed()
-        self.btn_fetch.setEnabled(True)
-        self.statusBar().showMessage("Dati ETF estratti con successo.")
+            for le in self.etf_inputs.values(): le.blockSignals(True)
+            for key, value in data.items():
+                if key in self.etf_inputs and (isinstance(value, float) or isinstance(value, int)):
+                    if key == 'aum':
+                        self.etf_inputs[key].setText(f"{float(value):.2f}")
+                    else:
+                        self.etf_inputs[key].setText(utils.format_to_string(float(value)))
+            for le in self.etf_inputs.values(): le.blockSignals(False)
+
+            self._on_etf_input_changed()
+            self.btn_fetch.setEnabled(True)
+            self.statusBar().showMessage("Dati ETF estratti con successo.")
+            logger.info("Rendering dell'interfaccia ETF completato con totale successo.")
+
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            logger.error(f"Crash bloccato durante il popolamento dell'interfaccia ETF:\n{error_trace}")
+            self.btn_fetch.setEnabled(True)
+            QMessageBox.critical(self, "Errore Aggiornamento ETF",
+                                 f"I dati dell'ETF hanno causato un conflitto grafico:\n{str(e)}")
 
     def _on_etf_fetch_error(self, error_msg: str) -> None:
         self.btn_fetch.setEnabled(True)
