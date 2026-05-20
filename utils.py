@@ -5,16 +5,17 @@ Contiene funzioni pure di supporto indipendenti dal dominio per la
 formattazione, sanificazione avanzata dei dati e la gestione globale delle eccezioni.
 
 Autore: Enrico Martini
-Versione: 0.6.0
+Versione: 0.6.1
 """
 
 import traceback
+import sys
 from typing import Any
 
 try:
-    from PyQt6.QtWidgets import QMessageBox
+    from PyQt6.QtWidgets import QMessageBox, QApplication
+    from PyQt6.QtCore import QThread
 except ImportError as e:
-    import sys
     print(f"Errore: PyQt6 non trovato. Eseguire 'pip install PyQt6'.\nDettagli: {e}")
     sys.exit(1)
 
@@ -22,6 +23,7 @@ except ImportError as e:
 def global_exception_handler(exc_type: type, exc_value: BaseException, exc_tb: Any) -> None:
     """
     Cattura crash imprevisti nel thread principale ed evita la chiusura silenziosa.
+    Aggiunta sicurezza thread per impedire crash fatali su Windows.
 
     Args:
         exc_type (type): Tipo dell'eccezione sollevata.
@@ -29,6 +31,15 @@ def global_exception_handler(exc_type: type, exc_value: BaseException, exc_tb: A
         exc_tb (Any): Traceback dell'errore.
     """
     error_msg: str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+
+    # Controllo critico: non istanziare widget GUI se non siamo nel Main Thread.
+    # Instanziare una QMessageBox da un thread secondario (es. quelli interni di yfinance)
+    # causa la chiusura istantanea e silenziosa dell'applicazione su Windows.
+    app = QApplication.instance()
+    if app and app.thread() != QThread.currentThread():
+        print(f"[Eccezione in Background - Ignorata per sicurezza GUI]\n{error_msg}", file=sys.stderr)
+        return
+
     msg = QMessageBox()
     msg.setIcon(QMessageBox.Icon.Critical)
     msg.setWindowTitle("Errore Fatale di Sistema")
