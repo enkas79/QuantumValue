@@ -5,9 +5,10 @@ Gestisce tutti i task asincroni interfacciando le funzioni pure
 del Model con la View (GUI), eliminando ogni classe fittizia intermedia.
 
 Autore: Enrico Martini
-Versione: 0.6.2
+Versione: 0.6.5
 """
 
+import asyncio
 from typing import Optional, List, Tuple, Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal, QObject
 
@@ -37,7 +38,6 @@ class UpdateCheckWorker(QThread):
 
 class SearchWorker(QThread):
     """Worker in background per la ricerca testuale dei Ticker."""
-    # Modificato in 'object' per evitare il Segfault del marshalling PyQt C++
     finished = pyqtSignal(object, str)
     error = pyqtSignal(str)
 
@@ -56,7 +56,6 @@ class SearchWorker(QThread):
 
 class FetchWorker(QThread):
     """Worker in background per il download dei fondamentali contabili (Azioni)."""
-    # Modificato in 'object' per sicurezza
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
@@ -66,6 +65,9 @@ class FetchWorker(QThread):
         self.ticker: str = ticker
 
     def run(self) -> None:
+        # Crea un loop asincrono temporaneo per proteggere yfinance su Windows
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             data: Dict[str, Any] = self.fetcher.fetch_data(self.ticker)
             self.finished.emit(data)
@@ -73,11 +75,13 @@ class FetchWorker(QThread):
             self.error.emit(str(e))
         except Exception as e:
             self.error.emit(f"Errore imprevisto durante il download: {str(e)}")
+        finally:
+            # Assicura la chiusura del loop per prevenire Segfault
+            loop.close()
 
 
 class EtfFetchWorker(QThread):
     """Worker in background per il download e screening dei fondi passivi (ETF)."""
-    # Modificato in 'object' per sicurezza
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
@@ -86,6 +90,8 @@ class EtfFetchWorker(QThread):
         self.query: str = query
 
     def run(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             data: Dict[str, Any] = models.fetch_etf_data(self.query)
             self.finished.emit(data)
@@ -93,3 +99,5 @@ class EtfFetchWorker(QThread):
             self.error.emit(str(e))
         except Exception as e:
             self.error.emit(f"Errore imprevisto ETF: {str(e)}")
+        finally:
+            loop.close()

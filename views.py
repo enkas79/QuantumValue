@@ -331,9 +331,13 @@ class MainWindow(QMainWindow):
     def _check_for_updates(self, silent: bool = True) -> None:
         if not silent:
             self.statusBar().showMessage("Ricerca aggiornamenti su GitHub...")
-        self.update_worker = UpdateCheckWorker(VERSION, GITHUB_REPO, parent=self)
+
+        # Rimozione del parent per evitare reference circolari e aggiunta del deleteLater
+        self.update_worker = UpdateCheckWorker(VERSION, GITHUB_REPO)
         self.update_worker.finished.connect(lambda u, v, url: self._on_update_checked(u, v, url, silent))
+        self.update_worker.finished.connect(self.update_worker.deleteLater)
         self.update_worker.error.connect(lambda e: self._on_update_error(e, silent))
+        self.update_worker.error.connect(self.update_worker.deleteLater)
         self.update_worker.start()
 
     def _on_update_checked(self, update_available: bool, new_version: str, download_url: str, silent: bool) -> None:
@@ -615,15 +619,19 @@ class MainWindow(QMainWindow):
             for lbl in (self.lbl_var_1d, self.lbl_var_1w, self.lbl_var_1m, self.lbl_var_1y):
                 lbl.setText("--")
 
-            self.search_worker = SearchWorker(query, parent=self)
+            self.search_worker = SearchWorker(query)
             self.search_worker.finished.connect(self._on_search_success)
+            self.search_worker.finished.connect(self.search_worker.deleteLater)
             self.search_worker.error.connect(self._on_search_error)
+            self.search_worker.error.connect(self.search_worker.deleteLater)
             self.search_worker.start()
         else:
             self.lbl_etf_name.setText("Fondo/ETF: --")
-            self.etf_worker = EtfFetchWorker(query, parent=self)
+            self.etf_worker = EtfFetchWorker(query)
             self.etf_worker.finished.connect(self._on_etf_fetch_success)
+            self.etf_worker.finished.connect(self.etf_worker.deleteLater)
             self.etf_worker.error.connect(self._on_etf_fetch_error)
+            self.etf_worker.error.connect(self.etf_worker.deleteLater)
             self.etf_worker.start()
 
     def _on_search_success(self, results: List[Tuple[str, str, str]], query: str) -> None:
@@ -666,9 +674,11 @@ class MainWindow(QMainWindow):
         self.btn_fetch.setEnabled(False)
         self.statusBar().showMessage(f"Download dati per {ticker} in corso...")
 
-        self.fetch_worker = FetchWorker(self.fetcher, ticker, parent=self)
+        self.fetch_worker = FetchWorker(self.fetcher, ticker)
         self.fetch_worker.finished.connect(self._on_fetch_success)
+        self.fetch_worker.finished.connect(self.fetch_worker.deleteLater)
         self.fetch_worker.error.connect(self._on_fetch_error)
+        self.fetch_worker.error.connect(self.fetch_worker.deleteLater)
         self.fetch_worker.start()
 
     def _on_fetch_success(self, data: Dict[str, Any]) -> None:
