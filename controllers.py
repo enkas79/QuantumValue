@@ -5,7 +5,7 @@ Gestisce tutti i task asincroni interfacciando le funzioni pure
 del Model con la View (GUI), eliminando ogni classe fittizia intermedia.
 
 Autore: Enrico Martini
-Versione: 0.6.0
+Versione: 0.6.2
 """
 
 from typing import Optional, List, Tuple, Dict, Any
@@ -37,7 +37,8 @@ class UpdateCheckWorker(QThread):
 
 class SearchWorker(QThread):
     """Worker in background per la ricerca testuale dei Ticker."""
-    finished = pyqtSignal(list, str)
+    # Modificato in 'object' per evitare il Segfault del marshalling PyQt C++
+    finished = pyqtSignal(object, str)
     error = pyqtSignal(str)
 
     def __init__(self, query: str, parent: Optional[QObject] = None) -> None:
@@ -55,7 +56,8 @@ class SearchWorker(QThread):
 
 class FetchWorker(QThread):
     """Worker in background per il download dei fondamentali contabili (Azioni)."""
-    finished = pyqtSignal(dict)
+    # Modificato in 'object' per sicurezza
+    finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
     def __init__(self, fetcher: models.FinancialDataFetcher, ticker: str, parent: Optional[QObject] = None) -> None:
@@ -75,7 +77,8 @@ class FetchWorker(QThread):
 
 class EtfFetchWorker(QThread):
     """Worker in background per il download e screening dei fondi passivi (ETF)."""
-    finished = pyqtSignal(dict)
+    # Modificato in 'object' per sicurezza
+    finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
     def __init__(self, query: str, parent: Optional[QObject] = None) -> None:

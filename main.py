@@ -6,6 +6,7 @@ Questo è il file che dovrai puntare con PyInstaller per creare l'eseguibile:
 comando: pyinstaller --onefile --windowed main.py
 
 Autore: Enrico Martini
+Versione: 0.6.2
 """
 # comando Windows: pyinstaller --onefile --windowed --add-data "version.txt;." main.py
 # comando macOS/Linux: pyinstaller --onefile --windowed --add-data "version.txt:." main.py
@@ -13,6 +14,18 @@ Autore: Enrico Martini
 import sys
 import multiprocessing
 from typing import Any
+
+# --- PROTEZIONE CRITICA PER PYINSTALLER --WINDOWED SU WINDOWS ---
+class DummyStream:
+    """Stream vuoto per prevenire crash su stampe o log di librerie terze."""
+    def write(self, *args: Any, **kwargs: Any) -> None: pass
+    def flush(self, *args: Any, **kwargs: Any) -> None: pass
+
+if sys.stdout is None:
+    sys.stdout = DummyStream()
+if sys.stderr is None:
+    sys.stderr = DummyStream()
+# ----------------------------------------------------------------
 
 # Importazioni di PyQt6 strettamente necessarie per l'avvio
 try:

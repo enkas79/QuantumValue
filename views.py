@@ -637,9 +637,9 @@ class MainWindow(QMainWindow):
             self._start_data_fetch(exact_match[0])
         else:
             dialog = TickerSearchDialog(results, self)
-            # FIX: In PyQt6 exec() restituisce un int (1 per Accepted).
-            # Evita comparazioni dirette con Enum che possono fallire o generare artefatti.
-            if dialog.exec() == 1 and dialog.selected_ticker:
+            result_code = dialog.exec()
+            # Accetta sia la rappresentazione interna numerica (1) che l'oggetto Enum PyQt6
+            if (result_code == 1 or result_code == QDialog.DialogCode.Accepted) and dialog.selected_ticker:
                 self.input_ticker.setText(dialog.selected_ticker)
                 self._start_data_fetch(dialog.selected_ticker)
 
