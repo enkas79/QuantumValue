@@ -39,20 +39,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography
 
-    - name: Copia icona per PyInstaller
-      shell: bash
-      run: |
-        if [ -f "src/icon.ico" ]; then
-          cp src/icon.ico .
-        fi
-
     - name: Creazione Cartella Eseguibile (PyInstaller)
       shell: bash
       run: |
         cd src
         ICON_ARGS=""
-        if [ -f "../icon.ico" ]; then
-          ICON_ARGS="--icon=../icon.ico --add-data ../icon.ico;."
+        if [ -f "icon.ico" ]; then
+          ICON_ARGS="--icon=icon.ico --add-data icon.ico;."
           echo "Trovata icon.ico: la includo nella build."
         else
           echo "Nessuna icona trovata: eseguo la build standard senza icona."
@@ -64,14 +57,29 @@ jobs:
 
     - name: Copia i file necessari nella directory dist
       run: |
-        # Copia la directory data se esiste
-        if (Test-Path "src\data") {
-          Copy-Item -Path "src\data" -Destination "dist\QuantumValue_Analysis" -Recurse -Force
+        # PyInstaller crea la directory dist all'interno di src, quindi dobbiamo copiare da lì
+        # Crea la directory dist nella root se non esiste
+        if (!(Test-Path "dist")) {
+          New-Item -ItemType Directory -Path "dist" -Force | Out-Null
         }
-        # Copia l'icona nella directory dist e nella directory corrente per Inno Setup
+        
+        # Copia tutto da src/dist a dist (se esiste)
+        if (Test-Path "src\dist") {
+          Copy-Item -Path "src\dist\*" -Destination "dist" -Recurse -Force
+        } else {
+          Write-Host "Attenzione: directory src\dist non trovata"
+          exit 1
+        }
+        
+        # Copia l'icona nella directory corrente per Inno Setup
+        # e in dist/QuantumValue_Analysis per l'installer
         if (Test-Path "src\icon.ico") {
-          Copy-Item -Path "src\icon.ico" -Destination "dist\QuantumValue_Analysis\icon.ico" -Force
           Copy-Item -Path "src\icon.ico" -Destination ".\icon.ico" -Force
+          # Assicurati che la directory dist/QuantumValue_Analysis esista
+          if (!(Test-Path "dist\QuantumValue_Analysis")) {
+            New-Item -ItemType Directory -Path "dist\QuantumValue_Analysis" -Force | Out-Null
+          }
+          Copy-Item -Path "src\icon.ico" -Destination "dist\QuantumValue_Analysis\icon.ico" -Force
         }
 
     - name: Creazione script Inno Setup (.iss)
@@ -150,21 +158,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography
 
-    - name: Copia icona per PyInstaller (Linux)
-      shell: bash
-      run: |
-        if [ -f "src/icon.ico" ]; then
-          cp src/icon.ico .
-        fi
-
     - name: Creazione Eseguibile Linux (PyInstaller)
       shell: bash
       run: |
         cd src
         ICON_ARGS=""
-        if [ -f "../icon.ico" ]; then
+        if [ -f "icon.ico" ]; then
           # Nota: Su Linux si usa i due punti ':' per separare i path in --add-data
-          ICON_ARGS="--icon=../icon.ico --add-data ../icon.ico:."
+          ICON_ARGS="--icon=icon.ico --add-data icon.ico:."
           echo "Trovata icon.ico: la includo nella build."
         else
           echo "Nessuna icona trovata: eseguo la build standard senza icona."
@@ -187,12 +188,20 @@ jobs:
         mkdir -p $DEB_DIR/usr/share/icons/hicolor/256x256/apps
 
         # 2. Copia l'applicazione dentro /opt/
-        cp -r dist/QuantumValue_Analysis/* $DEB_DIR/opt/QuantumValue/
-        chmod +x $DEB_DIR/opt/QuantumValue/QuantumValue_Analysis
+        # PyInstaller crea dist all'interno di src, quindi copiamo da lì
+        if [ -d "src/dist/QuantumValue_Analysis" ]; then
+          cp -r src/dist/QuantumValue_Analysis/* $DEB_DIR/opt/QuantumValue/
+          chmod +x $DEB_DIR/opt/QuantumValue/QuantumValue_Analysis
+        else
+          echo "Attenzione: directory src/dist/QuantumValue_Analysis non trovata"
+          exit 1
+        fi
         
         # 3. Copia l'icona nella directory corretta
         if [ -f "src/icon.ico" ]; then
           cp src/icon.ico $DEB_DIR/opt/QuantumValue/icon.ico
+          # Copia anche nella directory corrente per eventuali riferimenti
+          cp src/icon.ico .
         fi
 
         # 4. Crea il file 'control' necessario al package manager APT/dpkg
