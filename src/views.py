@@ -12,6 +12,9 @@ import os
 import sys
 from typing import Optional, Dict, Union, Tuple, List, Any
 
+# Aggiungi la directory corrente al path per importare i moduli locali
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QMessageBox, QGroupBox, QGridLayout,

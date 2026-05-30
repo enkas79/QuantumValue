@@ -9,11 +9,15 @@ Versione: 0.6.5
 """
 
 import os
+import sys
 import json
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
+
+# Aggiungi la directory corrente al path per importare i moduli locali
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import CACHE_DB_PATH, CACHE_EXPIRY_HOURS
 

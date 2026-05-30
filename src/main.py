@@ -12,8 +12,12 @@ Versione: 0.6.5
 # comando macOS/Linux: pyinstaller --onefile --windowed --add-data "version.txt:." main.py
 
 import sys
+import os
 import multiprocessing
 from typing import Any
+
+# Aggiungi la directory corrente al path per importare i moduli locali
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 class DummyStream:
@@ -34,7 +38,7 @@ except ImportError as e:
     print(f"Errore: PyQt6 non trovato. Eseguire 'pip install PyQt6'.\nDettagli: {e}")
     sys.exit(1)
 
-# Importa i moduli dalla directory src
+# Importa i moduli dalla directory corrente (src/)
 import utils
 from views import MainWindow
 

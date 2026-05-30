@@ -17,6 +17,9 @@ import tempfile
 from typing import Any, Union
 from logging.handlers import RotatingFileHandler
 
+# Aggiungi la directory corrente al path per importare i moduli locali
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 try:
     from PyQt6.QtWidgets import QMessageBox, QApplication
     from PyQt6.QtCore import QThread

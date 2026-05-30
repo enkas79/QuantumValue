@@ -9,8 +9,13 @@ Versione: 0.6.5
 """
 
 import asyncio
+import sys
+import os
 from typing import Optional, List, Tuple, Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal, QObject
+
+# Aggiungi la directory corrente al path per importare i moduli locali
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import models
 

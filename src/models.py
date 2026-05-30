@@ -9,8 +9,12 @@ Versione: 0.6.5
 """
 
 import sys
+import os
 import json
 from typing import Dict, Union, Tuple, List, Any, Optional
+
+# Aggiungi la directory corrente al path per importare i moduli locali
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     import yfinance as yf

@@ -11,6 +11,9 @@ Versione: 0.6.0
 import os
 import sys
 
+# Aggiungi la directory corrente al path per importare i moduli locali
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 
 def _get_base_path() -> str:
     """Restituisce il percorso base dell'applicazione gestendo PyInstaller."""
