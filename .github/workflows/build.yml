@@ -39,13 +39,20 @@ jobs:
         python -m pip install --upgrade pip
         pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography
 
+    - name: Copia icona per PyInstaller
+      shell: bash
+      run: |
+        if [ -f "src/icon.ico" ]; then
+          cp src/icon.ico .
+        fi
+
     - name: Creazione Cartella Eseguibile (PyInstaller)
       shell: bash
       run: |
         cd src
         ICON_ARGS=""
-        if [ -f "icon.ico" ]; then
-          ICON_ARGS="--icon=icon.ico --add-data icon.ico;."
+        if [ -f "../icon.ico" ]; then
+          ICON_ARGS="--icon=../icon.ico --add-data ../icon.ico;."
           echo "Trovata icon.ico: la includo nella build."
         else
           echo "Nessuna icona trovata: eseguo la build standard senza icona."
@@ -61,11 +68,16 @@ jobs:
         if (Test-Path "src\data") {
           Copy-Item -Path "src\data" -Destination "dist\QuantumValue_Analysis" -Recurse -Force
         }
+        # Copia l'icona nella directory dist e nella directory corrente per Inno Setup
+        if (Test-Path "src\icon.ico") {
+          Copy-Item -Path "src\icon.ico" -Destination "dist\QuantumValue_Analysis\icon.ico" -Force
+          Copy-Item -Path "src\icon.ico" -Destination ".\icon.ico" -Force
+        }
 
     - name: Creazione script Inno Setup (.iss)
       run: |
         $iconLine = ""
-        if (Test-Path "src\icon.ico") {
+        if (Test-Path ".\icon.ico") {
             $iconLine = "SetupIconFile=icon.ico"
         }
 
@@ -85,6 +97,7 @@ jobs:
 
         [Files]
         Source: "dist\QuantumValue_Analysis\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+        Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
         [Icons]
         Name: "{group}\QuantumValue Analysis"; Filename: "{app}\QuantumValue_Analysis.exe"; IconFilename: "{app}\QuantumValue_Analysis.exe"
@@ -137,14 +150,21 @@ jobs:
         python -m pip install --upgrade pip
         pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography
 
+    - name: Copia icona per PyInstaller (Linux)
+      shell: bash
+      run: |
+        if [ -f "src/icon.ico" ]; then
+          cp src/icon.ico .
+        fi
+
     - name: Creazione Eseguibile Linux (PyInstaller)
       shell: bash
       run: |
         cd src
         ICON_ARGS=""
-        if [ -f "icon.ico" ]; then
+        if [ -f "../icon.ico" ]; then
           # Nota: Su Linux si usa i due punti ':' per separare i path in --add-data
-          ICON_ARGS="--icon=icon.ico --add-data icon.ico:."
+          ICON_ARGS="--icon=../icon.ico --add-data ../icon.ico:."
           echo "Trovata icon.ico: la includo nella build."
         else
           echo "Nessuna icona trovata: eseguo la build standard senza icona."
@@ -169,8 +189,13 @@ jobs:
         # 2. Copia l'applicazione dentro /opt/
         cp -r dist/QuantumValue_Analysis/* $DEB_DIR/opt/QuantumValue/
         chmod +x $DEB_DIR/opt/QuantumValue/QuantumValue_Analysis
+        
+        # 3. Copia l'icona nella directory corretta
+        if [ -f "src/icon.ico" ]; then
+          cp src/icon.ico $DEB_DIR/opt/QuantumValue/icon.ico
+        fi
 
-        # 3. Crea il file 'control' necessario al package manager APT/dpkg
+        # 4. Crea il file 'control' necessario al package manager APT/dpkg
         cat <<EOF > $DEB_DIR/DEBIAN/control
         Package: quantumvalue-analysis
         Version: ${VERSION}
@@ -181,26 +206,26 @@ jobs:
         Description: QuantumValue Analysis - Analisi Fondamentale e Value Investing.
         EOF
 
-        # 4. Gestione dinamica dell'icona per Linux
+        # 5. Gestione dinamica dell'icona per Linux
         if [ -f "src/icon.ico" ]; then
           convert src/icon.ico[0] -resize 256x256 $DEB_DIR/usr/share/icons/hicolor/256x256/apps/quantumvalue.png || true
-          ICON_LINE="Icon=quantumvalue"
+          ICON_LINE="Icon=/opt/QuantumValue/icon.ico"
         fi
 
-        # 5. Crea il file .desktop per farlo comparire nel menu delle applicazioni
+        # 6. Crea il file .desktop per farlo comparire nel menu delle applicazioni
         cat <<EOF > $DEB_DIR/usr/share/applications/quantumvalue.desktop
         [Desktop Entry]
         Version=${VERSION}
         Name=QuantumValue Analysis
         Comment=Analisi Fondamentale e Occasioni in Borsa
         Exec=/opt/QuantumValue/QuantumValue_Analysis
-        ${ICON_LINE}
+        Icon=/opt/QuantumValue/icon.ico
         Terminal=false
         Type=Application
         Categories=Finance;Office;
         EOF
 
-        # 6. Compila finalmente il pacchetto .deb
+        # 7. Compila finalmente il pacchetto .deb
         dpkg-deb --build $DEB_DIR
 
     - name: Pubblica la Release su GitHub (Linux)
