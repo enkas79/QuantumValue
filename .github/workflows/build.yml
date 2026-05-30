@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'version.txt' # Il server partirà SOLO se viene modificato questo file
+      - 'src/version.txt' # Il server partirà SOLO se viene modificato questo file
   workflow_dispatch:
 
 permissions:
@@ -26,7 +26,7 @@ jobs:
     - name: Leggi la versione da version.txt
       shell: bash
       run: |
-        VERSION=$(cat version.txt)
+        VERSION=$(cat src/version.txt)
         echo "VERSION=$VERSION" >> $GITHUB_ENV
 
     - name: Installazione Python
@@ -37,11 +37,12 @@ jobs:
     - name: Installazione Librerie
       run: |
         python -m pip install --upgrade pip
-        pip install PyQt6 yfinance pandas requests pyinstaller
+        pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography
 
     - name: Creazione Cartella Eseguibile (PyInstaller)
       shell: bash
       run: |
+        cd src
         ICON_ARGS=""
         if [ -f "icon.ico" ]; then
           ICON_ARGS="--icon=icon.ico --add-data icon.ico;."
@@ -49,12 +50,22 @@ jobs:
         else
           echo "Nessuna icona trovata: eseguo la build standard senza icona."
         fi
-        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis $ICON_ARGS --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt;." main.py
+        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis $ICON_ARGS \
+          --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance \
+          --hidden-import=httpx --hidden-import=tenacity --hidden-import=cryptography \
+          --collect-all=yfinance --collect-all=PyQt6 --add-data "version.txt;." main.py
+
+    - name: Copia i file necessari nella directory dist
+      run: |
+        # Copia la directory data se esiste
+        if (Test-Path "src\data") {
+          Copy-Item -Path "src\data" -Destination "dist\QuantumValue_Analysis" -Recurse -Force
+        }
 
     - name: Creazione script Inno Setup (.iss)
       run: |
         $iconLine = ""
-        if (Test-Path "icon.ico") {
+        if (Test-Path "src\icon.ico") {
             $iconLine = "SetupIconFile=icon.ico"
         }
 
@@ -108,7 +119,7 @@ jobs:
     - name: Leggi la versione da version.txt
       shell: bash
       run: |
-        VERSION=$(cat version.txt)
+        VERSION=$(cat src/version.txt)
         echo "VERSION=$VERSION" >> $GITHUB_ENV
 
     - name: Installazione dipendenze di sistema (Debian/Ubuntu)
@@ -124,11 +135,12 @@ jobs:
     - name: Installazione Librerie
       run: |
         python -m pip install --upgrade pip
-        pip install PyQt6 yfinance pandas requests pyinstaller
+        pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography
 
     - name: Creazione Eseguibile Linux (PyInstaller)
       shell: bash
       run: |
+        cd src
         ICON_ARGS=""
         if [ -f "icon.ico" ]; then
           # Nota: Su Linux si usa i due punti ':' per separare i path in --add-data
@@ -137,7 +149,10 @@ jobs:
         else
           echo "Nessuna icona trovata: eseguo la build standard senza icona."
         fi
-        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis $ICON_ARGS --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance --collect-all=yfinance --add-data "version.txt:." main.py
+        pyinstaller --onedir --noconsole --name=QuantumValue_Analysis $ICON_ARGS \
+          --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance \
+          --hidden-import=httpx --hidden-import=tenacity --hidden-import=cryptography \
+          --collect-all=yfinance --collect-all=PyQt6 --add-data "version.txt:." main.py
 
     - name: Impacchettamento nel formato Debian (.deb)
       shell: bash
@@ -149,6 +164,7 @@ jobs:
         mkdir -p $DEB_DIR/DEBIAN
         mkdir -p $DEB_DIR/opt/QuantumValue
         mkdir -p $DEB_DIR/usr/share/applications
+        mkdir -p $DEB_DIR/usr/share/icons/hicolor/256x256/apps
 
         # 2. Copia l'applicazione dentro /opt/
         cp -r dist/QuantumValue_Analysis/* $DEB_DIR/opt/QuantumValue/
@@ -166,10 +182,8 @@ jobs:
         EOF
 
         # 4. Gestione dinamica dell'icona per Linux
-        ICON_LINE=""
-        if [ -f "icon.ico" ]; then
-          mkdir -p $DEB_DIR/usr/share/icons/hicolor/256x256/apps
-          convert icon.ico[0] -resize 256x256 $DEB_DIR/usr/share/icons/hicolor/256x256/apps/quantumvalue.png || true
+        if [ -f "src/icon.ico" ]; then
+          convert src/icon.ico[0] -resize 256x256 $DEB_DIR/usr/share/icons/hicolor/256x256/apps/quantumvalue.png || true
           ICON_LINE="Icon=quantumvalue"
         fi
 

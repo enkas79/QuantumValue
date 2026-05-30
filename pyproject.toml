@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "QuantumValue-Analysis"
+version = "0.6.5"
+description = "Analisi Fondamentale e Value Investing per Azioni ed ETF"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Enrico Martini", email = "enkas79@gmail.com"}
+]
+keywords = ["finance", "stocks", "etf", "value-investing", "analysis"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+dependencies = [
+    "PyQt6>=6.4.0",
+    "yfinance>=0.2.30",
+    "pandas>=2.0.3",
+    "requests>=2.31.0",
+    "httpx>=0.25.0",
+    "tenacity>=8.2.2",
+    "cryptography>=41.0.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pyinstaller>=6.0.0",
+]
+
+[project.scripts]
+quantumvalue = "src.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "--cov=src --cov-report=term-missing"

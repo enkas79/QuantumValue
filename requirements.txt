@@ -1,0 +1,19 @@
+# Dipendenze per QuantumValue Analysis
+# Versione: 0.6.5
+
+# Interfaccia Grafica
+PyQt6==6.4.0
+
+# Dati Finanziari
+yfinance==0.2.30
+pandas==2.0.3
+requests==2.31.0
+
+# Ottimizzazioni (opzionali ma consigliate)
+httpx==0.25.0
+tenacity==8.2.2
+cryptography==41.0.7
+
+# Test (opzionale per sviluppo)
+pytest==7.4.0
+pytest-cov==4.1.0
