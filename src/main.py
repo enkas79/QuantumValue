@@ -39,8 +39,8 @@ except ImportError as e:
     sys.exit(1)
 
 # Importa i moduli dalla directory corrente (src/)
-import utils
-from views import MainWindow
+from . import utils
+from . import views
 
 
 def main() -> None:
@@ -57,7 +57,7 @@ def main() -> None:
     app.setStyle("Fusion")
 
     # Istanzia la View (che a sua volta aggancia Models e Controllers)
-    window = MainWindow()
+    window = views.MainWindow()
     window.show()
 
     # Entra nel loop degli eventi
