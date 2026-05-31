@@ -6,7 +6,7 @@ Questo è il file che dovrai puntare con PyInstaller per creare l'eseguibile:
 comando: pyinstaller --onefile --windowed main.py
 
 Autore: Enrico Martini
-Versione: 0.7.0
+Versione: 0.7.1
 """
 # comando Windows: pyinstaller --onefile --windowed --add-data "version.txt;." main.py
 # comando macOS/Linux: pyinstaller --onefile --windowed --add-data "version.txt:." main.py
