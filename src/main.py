@@ -16,8 +16,12 @@ import os
 import multiprocessing
 from typing import Any
 
-# Aggiungi la directory corrente al path per importare i moduli locali
+# Aggiungi la directory src al path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Ora puoi importare i moduli da src/
+import utils
+from views import MainWindow
 
 
 class DummyStream:
