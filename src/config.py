@@ -5,7 +5,7 @@ Contiene le costanti globali, i metadati dell'applicazione,
 i parametri centralizzati delle chiamate HTTP e le mappe di conversione fisse.
 
 Autore: Enrico Martini
-Versione: 0.6.0
+Versione: 0.7.0
 """
 
 import os
