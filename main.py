@@ -5,14 +5,14 @@ Questo file è un wrapper che esegue il vero entry point in src/main.py
 per mantenere la compatibilità con le vecchie installazioni.
 
 Autore: Enrico Martini
-Versione: 0.6.5
+Versione: 0.7.0
 """
 
 import sys
 import os
 
 # Aggiungi la directory src al path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
 # Esegui il vero main
 from src.main import main
