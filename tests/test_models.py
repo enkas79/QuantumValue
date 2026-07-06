@@ -117,8 +117,8 @@ class TestEvaluateOpportunity:
         assert color == "#27ae60"  # excellent
     
     def test_evaluate_opportunity_possible(self):
-        """Test con valori accettabili."""
-        score, verdict, color, details = evaluate_opportunity(25.0, 2.5, 1.2, 12.0)
+        """Test con valori accettabili (PE e PS ideali, PEG ed EV/EBITDA no)."""
+        score, verdict, color, details = evaluate_opportunity(15.0, 1.5, 1.2, 12.0)
         assert 5.0 <= score < 7.5
         assert verdict == "POSSIBILE OCCASIONE (Valutare)"
     
@@ -140,8 +140,8 @@ class TestEvaluateETF:
         assert color == "#27ae60"  # excellent
     
     def test_evaluate_etf_good(self):
-        """Test con ETF buono."""
-        score, verdict, color, details = evaluate_etf(0.30, 800.0, 10.0, 8.0)
+        """Test con ETF buono (TER accettabile, AUM e rendimento buoni)."""
+        score, verdict, color, details = evaluate_etf(0.55, 800.0, 10.0, 8.0)
         assert 6.0 <= score < 7.5
         assert verdict == "BUON ETF (Valido)"
         assert color == "#2ecc71"  # good
