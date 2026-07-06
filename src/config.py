@@ -10,6 +10,7 @@ Versione: 0.7.0
 
 import os
 import sys
+import tempfile
 
 # Aggiungi la directory corrente al path per importare i moduli locali
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -76,9 +77,26 @@ COLORS = {
     "neutral": "#7f8c8d"
 }
 
+def _get_cache_dir() -> str:
+    """
+    Restituisce una cartella stabile e scrivibile per la cache persistente.
+
+    A differenza di _get_base_path(), non punta mai a _MEIPASS: con PyInstaller
+    quella cartella viene ricreata ed eliminata ad ogni avvio, quindi una cache
+    persistente lì dentro non sopravvivrebbe mai al riavvio dell'eseguibile.
+    """
+    user_home: str = os.path.expanduser("~")
+    cache_dir: str = os.path.join(user_home, ".quantumvalue", "cache")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        return cache_dir
+    except OSError:
+        return tempfile.gettempdir()
+
+
 # Impostazioni di caching
 CACHE_EXPIRY_HOURS: int = 1
-CACHE_DB_PATH: str = os.path.join(_get_base_path(), "data", "quantumvalue_cache.db")
+CACHE_DB_PATH: str = os.path.join(_get_cache_dir(), "quantumvalue_cache.db")
 
 # Dati statici di fallback per ticker comuni (usati se tutti i provider falliscono)
 STATIC_FALLBACK = {

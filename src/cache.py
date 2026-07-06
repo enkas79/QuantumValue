@@ -12,6 +12,7 @@ import os
 import sys
 import json
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
@@ -23,29 +24,38 @@ from config import CACHE_DB_PATH, CACHE_EXPIRY_HOURS
 
 logger = logging.getLogger("QuantumValue")
 
+# Connessione unica riutilizzata tra le chiamate (evita di aprire/chiudere
+# una connessione SQLite ad ogni get/set, costoso quando si analizzano piu'
+# ticker in sequenza). Protetta da un lock perche' i fetch girano su QThread
+# separati.
+_conn: Optional[sqlite3.Connection] = None
+_conn_lock = threading.Lock()
 
-def _init_cache_db() -> sqlite3.Connection:
+
+def _get_connection() -> sqlite3.Connection:
     """
-    Inizializza il database SQLite per il caching.
-    
+    Restituisce la connessione SQLite condivisa, inizializzandola alla prima chiamata.
+
     Returns:
         sqlite3.Connection: Connessione al database.
     """
-    # Assicurati che la directory esista
-    cache_dir = os.path.dirname(CACHE_DB_PATH)
-    if cache_dir and not os.path.exists(cache_dir):
-        os.makedirs(cache_dir, exist_ok=True)
-    
-    conn = sqlite3.connect(CACHE_DB_PATH, check_same_thread=False)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS cache (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            timestamp DATETIME NOT NULL
-        )
-    """)
-    conn.commit()
-    return conn
+    global _conn
+    if _conn is None:
+        # Assicurati che la directory esista
+        cache_dir = os.path.dirname(CACHE_DB_PATH)
+        if cache_dir and not os.path.exists(cache_dir):
+            os.makedirs(cache_dir, exist_ok=True)
+
+        _conn = sqlite3.connect(CACHE_DB_PATH, check_same_thread=False)
+        _conn.execute("""
+            CREATE TABLE IF NOT EXISTS cache (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                timestamp DATETIME NOT NULL
+            )
+        """)
+        _conn.commit()
+    return _conn
 
 
 def get_cached(key: str) -> Optional[Dict[str, Any]]:
@@ -59,12 +69,12 @@ def get_cached(key: str) -> Optional[Dict[str, Any]]:
         Optional[Dict[str, Any]]: Dati cacheati o None se scaduti/inesistenti.
     """
     try:
-        conn = _init_cache_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT value, timestamp FROM cache WHERE key = ?", (key,))
-        result = cursor.fetchone()
-        conn.close()
-        
+        with _conn_lock:
+            conn = _get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT value, timestamp FROM cache WHERE key = ?", (key,))
+            result = cursor.fetchone()
+
         if result:
             value_json, timestamp_str = result
             timestamp = datetime.fromisoformat(timestamp_str)
@@ -95,16 +105,16 @@ def set_cached(key: str, value: Dict[str, Any]) -> bool:
         bool: True se il salvataggio è riuscito, False altrimenti.
     """
     try:
-        conn = _init_cache_db()
         value_json = json.dumps(value)
         timestamp = datetime.now().isoformat()
-        
-        conn.execute(
-            "INSERT OR REPLACE INTO cache (key, value, timestamp) VALUES (?, ?, ?)",
-            (key, value_json, timestamp)
-        )
-        conn.commit()
-        conn.close()
+
+        with _conn_lock:
+            conn = _get_connection()
+            conn.execute(
+                "INSERT OR REPLACE INTO cache (key, value, timestamp) VALUES (?, ?, ?)",
+                (key, value_json, timestamp)
+            )
+            conn.commit()
         logger.debug(f"Cache salvato per chiave: {key}")
         return True
     except Exception as e:
@@ -123,10 +133,10 @@ def _remove_cached(key: str) -> bool:
         bool: True se la rimozione è riuscita, False altrimenti.
     """
     try:
-        conn = _init_cache_db()
-        conn.execute("DELETE FROM cache WHERE key = ?", (key,))
-        conn.commit()
-        conn.close()
+        with _conn_lock:
+            conn = _get_connection()
+            conn.execute("DELETE FROM cache WHERE key = ?", (key,))
+            conn.commit()
         return True
     except Exception as e:
         logger.error(f"Errore nella rimozione dalla cache per {key}: {str(e)}")
@@ -141,10 +151,10 @@ def clear_cache() -> bool:
         bool: True se la pulizia è riuscita, False altrimenti.
     """
     try:
-        conn = _init_cache_db()
-        conn.execute("DELETE FROM cache")
-        conn.commit()
-        conn.close()
+        with _conn_lock:
+            conn = _get_connection()
+            conn.execute("DELETE FROM cache")
+            conn.commit()
         logger.info("Cache svuotata completamente")
         return True
     except Exception as e:
@@ -160,23 +170,22 @@ def get_cache_stats() -> Dict[str, int]:
         Dict[str, int]: Dizionario con conteggi (totale, scaduti, validi).
     """
     try:
-        conn = _init_cache_db()
-        cursor = conn.cursor()
-        
-        # Totale record
-        cursor.execute("SELECT COUNT(*) FROM cache")
-        total = cursor.fetchone()[0]
-        
-        # Record scaduti
-        expiry_time = timedelta(hours=CACHE_EXPIRY_HOURS)
-        current_time = datetime.now().isoformat()
-        cursor.execute(
-            "SELECT COUNT(*) FROM cache WHERE timestamp < datetime(?, '-' || ? || ' hours')",
-            (current_time, CACHE_EXPIRY_HOURS)
-        )
-        expired = cursor.fetchone()[0]
-        
-        conn.close()
+        with _conn_lock:
+            conn = _get_connection()
+            cursor = conn.cursor()
+
+            # Totale record
+            cursor.execute("SELECT COUNT(*) FROM cache")
+            total = cursor.fetchone()[0]
+
+            # Record scaduti
+            current_time = datetime.now().isoformat()
+            cursor.execute(
+                "SELECT COUNT(*) FROM cache WHERE timestamp < datetime(?, '-' || ? || ' hours')",
+                (current_time, CACHE_EXPIRY_HOURS)
+            )
+            expired = cursor.fetchone()[0]
+
         return {
             "total": total,
             "expired": expired,

@@ -11,6 +11,7 @@ Versione: 0.7.0
 import sys
 import os
 import json
+import logging
 from typing import Dict, Union, Tuple, List, Any, Optional
 
 # Aggiungi la directory corrente al path per importare i moduli locali
@@ -48,6 +49,7 @@ def _retry_request(func):
         return func
 
 
+@_retry_request
 def check_for_updates(current_version: str, repo_path: str) -> Tuple[bool, str, str]:
     """
     Verifica la presenza di una nuova release su GitHub via API pubblica.
@@ -278,6 +280,7 @@ def evaluate_etf(
     else: return avg_score, "ETF DA EVITARE (Costoso/Illiquido)", col_bad, details
 
 
+@_retry_request
 def search_by_name(query: str) -> List[Tuple[str, str, str]]:
     """
     Ricerca i ticker azionari ed ETF tramite endpoint pubblico di Yahoo Finance.
@@ -463,6 +466,7 @@ class FinancialDataFetcher:
                         f"Nessun dato statico disponibile per {ticker_upper}."
                     )
 
+    @_retry_request
     def _fetch_from_yahoo(self, ticker_symbol: str) -> Dict[str, Any]:
         """
         Recupera i dati da Yahoo Finance.
@@ -557,51 +561,56 @@ class FinancialDataFetcher:
             'peg': peg
         }
 
+    @_retry_request
     def _fetch_from_fmp(self, ticker_symbol: str) -> Dict[str, Any]:
         """
         Recupera i dati da Financial Modeling Prep (FMP).
-        
+
         Args:
             ticker_symbol (str): Simbolo del ticker.
-        
+
         Returns:
             Dict[str, Any]: Dati finanziari.
         """
         if not self.fmp_api_key:
             raise ValueError("Nessuna API Key FMP configurata.")
-        
+
         base_url: str = "https://financialmodelingprep.com/api/v3"
-        
+
         try:
-            # Recupera il profilo aziendale
-            prof_resp = requests.get(
-                f"{base_url}/profile/{ticker_symbol}?apikey={self.fmp_api_key}",
-                timeout=config.HTTP_TIMEOUT
-            ).json()
-            if not prof_resp:
-                raise ValueError("Azienda non trovata nel database FMP.")
-            profile: dict = prof_resp[0]
+            # Riutilizza la stessa connessione (keep-alive) per le 4 chiamate FMP,
+            # riducendo la latenza aggiuntiva proprio nel path di fallback (dove Yahoo
+            # e' gia' lento o ha fallito).
+            with requests.Session() as session:
+                # Recupera il profilo aziendale
+                prof_resp = session.get(
+                    f"{base_url}/profile/{ticker_symbol}?apikey={self.fmp_api_key}",
+                    timeout=config.HTTP_TIMEOUT
+                ).json()
+                if not prof_resp:
+                    raise ValueError("Azienda non trovata nel database FMP.")
+                profile: dict = prof_resp[0]
 
-            # Recupera le metriche chiave
-            km_resp = requests.get(
-                f"{base_url}/key-metrics-ttm/{ticker_symbol}?apikey={self.fmp_api_key}",
-                timeout=config.HTTP_TIMEOUT
-            ).json()
-            km: dict = km_resp[0] if km_resp else {}
+                # Recupera le metriche chiave
+                km_resp = session.get(
+                    f"{base_url}/key-metrics-ttm/{ticker_symbol}?apikey={self.fmp_api_key}",
+                    timeout=config.HTTP_TIMEOUT
+                ).json()
+                km: dict = km_resp[0] if km_resp else {}
 
-            # Recupera i ratios
-            ratios_resp = requests.get(
-                f"{base_url}/ratios-ttm/{ticker_symbol}?apikey={self.fmp_api_key}",
-                timeout=config.HTTP_TIMEOUT
-            ).json()
-            ratios: dict = ratios_resp[0] if ratios_resp else {}
+                # Recupera i ratios
+                ratios_resp = session.get(
+                    f"{base_url}/ratios-ttm/{ticker_symbol}?apikey={self.fmp_api_key}",
+                    timeout=config.HTTP_TIMEOUT
+                ).json()
+                ratios: dict = ratios_resp[0] if ratios_resp else {}
 
-            # Recupera il bilancio
-            inc_resp = requests.get(
-                f"{base_url}/income-statement/{ticker_symbol}?limit=1&apikey={self.fmp_api_key}",
-                timeout=config.HTTP_TIMEOUT
-            ).json()
-            inc: dict = inc_resp[0] if inc_resp else {}
+                # Recupera il bilancio
+                inc_resp = session.get(
+                    f"{base_url}/income-statement/{ticker_symbol}?limit=1&apikey={self.fmp_api_key}",
+                    timeout=config.HTTP_TIMEOUT
+                ).json()
+                inc: dict = inc_resp[0] if inc_resp else {}
 
             ev: float = float(km.get('enterpriseValueTTM', 0.0) or 0.0)
             ebitda: float = float(inc.get('ebitda', 0.0) or 0.0)

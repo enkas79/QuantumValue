@@ -162,13 +162,19 @@ def format_to_string(value: float) -> str:
 
 def encrypt_api_key(api_key: str) -> str:
     """
-    Cripta una API key usando una chiave derivata dal nome dell'autore.
-    
+    Offusca una API key con Fernet prima di salvarla su disco.
+
+    NOTA: la chiave di cifratura e' derivata da valori statici presenti nel
+    sorgente (pubblico) di questo repository, quindi questa funzione protegge
+    solo dalla lettura casuale del file di configurazione, non da un attaccante
+    che ha accesso al codice. Non usare per segreti che richiedono una vera
+    protezione crittografica.
+
     Args:
-        api_key (str): La chiave API da criptare.
-    
+        api_key (str): La chiave API da offuscare.
+
     Returns:
-        str: La chiave criptata in formato base64.
+        str: La chiave offuscata in formato base64.
     """
     try:
         from cryptography.fernet import Fernet
@@ -207,6 +213,6 @@ def decrypt_api_key(encrypted: str) -> str:
         fernet_key = base64.urlsafe_b64encode(key)
         f = Fernet(fernet_key)
         return f.decrypt(encrypted.encode()).decode()
-    except (ImportError, Exception):
+    except Exception:
         # Fallback: ritorna la chiave in plaintext se non può essere decriptata
         return encrypted

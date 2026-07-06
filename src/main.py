@@ -19,10 +19,6 @@ from typing import Any
 # Aggiungi la directory src al path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Ora puoi importare i moduli da src/
-import utils
-from views import MainWindow
-
 
 class DummyStream:
     """Stream vuoto per prevenire crash su stampe o log di librerie terze."""
