@@ -10,6 +10,7 @@ Versione: Dinamica (via config.py)
 
 import os
 import sys
+import csv
 from typing import Optional, Dict, Union, Tuple, List, Any
 
 # Aggiungi la directory corrente al path per importare i moduli locali
@@ -19,16 +20,94 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QMessageBox, QGroupBox, QGridLayout,
     QDialog, QTextBrowser, QDialogButtonBox, QTableWidget, QRadioButton,
-    QTableWidgetItem, QAbstractItemView, QHeaderView, QScrollArea, QTabWidget, QStackedWidget, QApplication
+    QTableWidgetItem, QAbstractItemView, QHeaderView, QScrollArea, QTabWidget, QStackedWidget, QApplication,
+    QFileDialog, QCompleter, QMenu
 )
-from PyQt6.QtGui import QAction, QFont, QDesktopServices, QScreen, QIcon
-from PyQt6.QtCore import Qt, QSettings, QTimer, QUrl
+from PyQt6.QtGui import (
+    QAction, QActionGroup, QFont, QDesktopServices, QScreen, QIcon,
+    QPainter, QPen, QColor, QPolygonF
+)
+from PyQt6.QtCore import Qt, QSettings, QTimer, QUrl, QPointF, QStringListModel
 
 # Importazioni corrette dei moduli interni funzionali
 import utils
 import models
+import theme
 from config import APP_NAME, VERSION, AUTHOR, GITHUB_REPO, COLORS
 from controllers import UpdateCheckWorker, SearchWorker, FetchWorker, EtfFetchWorker
+
+# Numero massimo di ticker memorizzati nella cronologia "Recenti"
+MAX_RECENT_TICKERS = 10
+
+# Spiegazioni sintetiche delle metriche, mostrate come tooltip
+METRIC_TOOLTIPS: Dict[str, str] = {
+    'ey': "Earnings Yield = EBIT / Enterprise Value.\nQuanto rendono gli utili operativi rispetto al costo totale dell'azienda (debiti inclusi).\nIdeale: superiore all'8%.",
+    'roic': "ROIC = NOPAT / Capitale Investito.\nEfficienza con cui l'azienda genera profitti dal capitale investito.\nIdeale: superiore al 15%.",
+    'ev_ebitda': "EV/EBITDA: quanto costa l'intero business rispetto ai flussi operativi.\nIdeale: inferiore a 10.",
+    'pe': "P/E (Prezzo/Utile): quanto paghi per ogni euro di utile.\nIdeale: inferiore a 20.",
+    'ps': "P/S (Prezzo/Ricavi): quanto il mercato paga rispetto ai ricavi.\nIdeale: inferiore a 2.",
+    'peg': "PEG = P/E rapportato alla crescita attesa degli utili.\nIdeale: inferiore a 1.",
+    'ebit': "EBIT: utile operativo, prima di interessi e tasse.",
+    'ev': "Enterprise Value: capitalizzazione + debito netto.\nIl costo reale per comprare l'intera azienda.",
+    'nopat': "NOPAT: utile operativo netto dopo le tasse.",
+    'invested_capital': "Capitale Investito: debito totale + patrimonio netto.",
+    'ebitda': "EBITDA: utile operativo prima di ammortamenti e svalutazioni.",
+    'ter': "TER: costi annuali di gestione dell'ETF.\nIdeale: inferiore allo 0,25%.",
+    'aum': "AUM: capitale totale gestito dal fondo (in milioni).\nIdeale: superiore a 500M (piu' liquidita', meno rischio di chiusura).",
+    'ret_1y': "Rendimento dell'ultimo anno.",
+    'ret_3y': "Rendimento degli ultimi 3 anni.",
+}
+
+
+class SparklineWidget(QWidget):
+    """
+    Mini-grafico dell'andamento del prezzo (ultimo anno), disegnato con
+    QPainter: nessuna dipendenza grafica aggiuntiva. Verde se il trend
+    complessivo e' positivo, rosso se negativo.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._points: List[float] = []
+        self.setFixedSize(160, 42)
+        self.setToolTip("Andamento del prezzo nell'ultimo anno")
+
+    def set_points(self, points: List[float]) -> None:
+        self._points = [float(p) for p in points if isinstance(p, (int, float))]
+        self.update()
+
+    def clear(self) -> None:
+        self.set_points([])
+
+    def paintEvent(self, event: Any) -> None:
+        if len(self._points) < 2:
+            return
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pts = self._points
+            w, h, pad = self.width(), self.height(), 3
+            lo, hi = min(pts), max(pts)
+            span = (hi - lo) or 1.0
+            n = len(pts)
+            xs = [pad + i * (w - 2 * pad) / (n - 1) for i in range(n)]
+            ys = [h - pad - (p - lo) * (h - 2 * pad) / span for p in pts]
+            line_color = QColor(COLORS["excellent"] if pts[-1] >= pts[0] else COLORS["bad"])
+
+            # Area riempita sotto la linea, molto trasparente
+            fill_color = QColor(line_color)
+            fill_color.setAlpha(40)
+            curve = [QPointF(x, y) for x, y in zip(xs, ys)]
+            area = QPolygonF(curve + [QPointF(xs[-1], h - pad), QPointF(xs[0], h - pad)])
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(fill_color)
+            painter.drawPolygon(area)
+
+            painter.setPen(QPen(line_color, 1.6))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPolyline(QPolygonF(curve))
+        finally:
+            painter.end()
 
 
 class GuideDialog(QDialog):
@@ -144,7 +223,7 @@ class TickerSearchDialog(QDialog):
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
         lbl_info = QLabel("Seleziona l'azienda corretta e la relativa Borsa dalla lista:")
-        lbl_info.setStyleSheet("color: #2c3e50; font-weight: bold; margin-bottom: 5px;")
+        lbl_info.setStyleSheet(f"color: {theme.color('text')}; font-weight: bold; margin-bottom: 5px;")
         layout.addWidget(lbl_info)
         self.table = QTableWidget(len(self.results), 3)
         self.table.setHorizontalHeaderLabels(["Simbolo", "Nome Azienda", "Borsa"])
@@ -200,9 +279,15 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.settings = QSettings(AUTHOR.replace(" ", ""), APP_NAME.replace(" ", ""))
-        # Decripta la API key se è stata salvata criptata
-        encrypted_key = str(self.settings.value("fmp_api_key", ""))
-        self.fmp_api_key: str = utils.decrypt_api_key(encrypted_key) if encrypted_key else ""
+        # Carica la API key dal portachiavi di sistema (con fallback e
+        # migrazione automatica dalla vecchia copia offuscata in QSettings)
+        self.fmp_api_key: str = utils.load_api_key(self.settings)
+
+        # Cronologia degli ultimi ticker analizzati con successo
+        recent = self.settings.value("recent_tickers", [])
+        if isinstance(recent, str):
+            recent = [recent] if recent else []
+        self.recent_tickers: List[str] = [str(t) for t in (recent or [])][:MAX_RECENT_TICKERS]
 
         self.fetcher = models.FinancialDataFetcher(self.fmp_api_key)
 
@@ -225,9 +310,8 @@ class MainWindow(QMainWindow):
             dialog = FmpSetupDialog(self)
             if dialog.exec() == QDialog.DialogCode.Accepted and dialog.api_key:
                 self.fmp_api_key = dialog.api_key
-                # Cripta la API key prima di salvarla
-                encrypted_key = utils.encrypt_api_key(self.fmp_api_key)
-                self.settings.setValue("fmp_api_key", encrypted_key)
+                # Salva nel portachiavi di sistema (fallback: offuscata in QSettings)
+                utils.save_api_key(self.settings, self.fmp_api_key)
                 self.fetcher.fmp_api_key = self.fmp_api_key
                 self.statusBar().showMessage("API Key FMP configurata. Resilienza dati attivata.")
             self.settings.setValue("fmp_asked_once", True)
@@ -308,11 +392,34 @@ class MainWindow(QMainWindow):
     def _create_menu_bar(self) -> None:
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("&File")
+
+        # Cronologia degli ultimi ticker analizzati
+        self.recent_menu = QMenu("Ticker &Recenti", self)
+        file_menu.addMenu(self.recent_menu)
+        self._rebuild_recent_menu()
+        file_menu.addSeparator()
+
+        export_action = QAction("Esporta &Analisi (CSV)...", self)
+        export_action.triggered.connect(self._export_csv)
+        file_menu.addAction(export_action)
+        file_menu.addSeparator()
+
         reset_api_action = QAction("&Reimposta API FMP", self)
         reset_api_action.triggered.connect(self._reset_api_key)
         file_menu.addAction(reset_api_action)
         file_menu.addSeparator()
         file_menu.addAction(QAction("&Esci", self, triggered=self.close))
+
+        # Menu Visualizza: scelta del tema chiaro/scuro
+        view_menu = menu_bar.addMenu("&Visualizza")
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)
+        for label, name in [("Tema &Chiaro", "light"), ("Tema &Scuro", "dark")]:
+            action = QAction(label, self, checkable=True)
+            action.setChecked(theme.current_theme() == name)
+            action.triggered.connect(lambda _checked, n=name: self._set_theme(n))
+            theme_group.addAction(action)
+            view_menu.addAction(action)
 
         help_menu = menu_bar.addMenu("&?")
         help_menu.addAction(
@@ -323,12 +430,150 @@ class MainWindow(QMainWindow):
         help_menu.addAction(QAction("&Info", self, triggered=lambda: InfoDialog(self).exec()))
 
     def _reset_api_key(self) -> None:
-        self.settings.remove("fmp_api_key")
+        utils.delete_api_key(self.settings)
         self.settings.setValue("fmp_asked_once", False)
         self.fmp_api_key = ""
         self.fetcher.fmp_api_key = ""
         QMessageBox.information(self, "API Resettata",
                                 "Impostazioni ripristinate. Al riavvio verrà richiesta la chiave.")
+
+    # ------------------------------------------------------------------
+    # Cronologia ticker recenti
+    # ------------------------------------------------------------------
+
+    def _rebuild_recent_menu(self) -> None:
+        """Ricostruisce il sottomenu File > Ticker Recenti e il completer."""
+        self.recent_menu.clear()
+        if not self.recent_tickers:
+            empty = QAction("(vuoto)", self)
+            empty.setEnabled(False)
+            self.recent_menu.addAction(empty)
+        else:
+            for ticker in self.recent_tickers:
+                action = QAction(ticker, self)
+                action.triggered.connect(lambda _checked, t=ticker: self._on_recent_selected(t))
+                self.recent_menu.addAction(action)
+            self.recent_menu.addSeparator()
+            clear_action = QAction("Svuota cronologia", self)
+            clear_action.triggered.connect(self._clear_recent_tickers)
+            self.recent_menu.addAction(clear_action)
+
+        if hasattr(self, "completer_model"):
+            self.completer_model.setStringList(self.recent_tickers)
+
+    def _add_recent_ticker(self, ticker: str) -> None:
+        """Aggiunge un ticker in testa alla cronologia (dedup, max N voci)."""
+        ticker = ticker.strip().upper()
+        if not ticker:
+            return
+        self.recent_tickers = [ticker] + [t for t in self.recent_tickers if t != ticker]
+        self.recent_tickers = self.recent_tickers[:MAX_RECENT_TICKERS]
+        self.settings.setValue("recent_tickers", self.recent_tickers)
+        self._rebuild_recent_menu()
+
+    def _clear_recent_tickers(self) -> None:
+        self.recent_tickers = []
+        self.settings.setValue("recent_tickers", [])
+        self._rebuild_recent_menu()
+
+    def _on_recent_selected(self, ticker: str) -> None:
+        self.input_ticker.setText(ticker)
+        self._on_search_requested()
+
+    # ------------------------------------------------------------------
+    # Tema chiaro/scuro
+    # ------------------------------------------------------------------
+
+    def _set_theme(self, name: str) -> None:
+        """Applica il tema scelto, lo salva nelle preferenze e aggiorna i colori dinamici."""
+        app = QApplication.instance()
+        if app:
+            theme.apply_theme(app, name)
+        self.settings.setValue("theme", name)
+        self._refresh_theme_colors()
+
+    def _refresh_theme_colors(self) -> None:
+        """
+        Riallinea al tema attivo gli stili inline impostati a runtime
+        (etichette colorate e valori), che lo stylesheet globale non copre.
+        """
+        self.lbl_company_name.setStyleSheet(
+            f"color: {theme.color('accent')}; font-weight: bold; font-size: 14px;")
+        self.lbl_etf_name.setStyleSheet(
+            f"color: {theme.color('accent_etf')}; font-weight: bold; font-size: 14px;")
+        self.lbl_etf_repl.setStyleSheet(f"color: {theme.color('muted')}; font-size: 11px;")
+        # Ricalcola metriche e verdetti cosi' i valori vengono ridisegnati
+        # con i colori del nuovo tema
+        self._on_input_changed()
+        self._on_etf_input_changed()
+
+    # ------------------------------------------------------------------
+    # Esportazione CSV
+    # ------------------------------------------------------------------
+
+    def _collect_export_rows(self) -> List[Tuple[str, str]]:
+        """Raccoglie i dati dell'analisi corrente come coppie (campo, valore)."""
+        rows: List[Tuple[str, str]] = [("Campo", "Valore")]
+        if self.rb_azione.isChecked():
+            rows.append(("Tipo", "Azione"))
+            rows.append(("Ticker", self.input_ticker.text().strip()))
+            rows.append(("Azienda", self.lbl_company_name.text().replace("Azienda: ", "")))
+            rows.append(("Prezzo", self.lbl_price.text().replace("Prezzo: ", "")))
+            for key, lbl in [("Var. 1D", self.lbl_var_1d), ("Var. 1W", self.lbl_var_1w),
+                             ("Var. 1M", self.lbl_var_1m), ("Var. 1Y", self.lbl_var_1y)]:
+                rows.append((key, lbl.text()))
+            field_names = {'ebit': 'EBIT', 'ev': 'EV', 'nopat': 'NOPAT',
+                           'invested_capital': 'Capitale Investito', 'ebitda': 'EBITDA',
+                           'pe': 'P/E', 'ps': 'P/S', 'peg': 'PEG'}
+            for key, le in self.inputs.items():
+                rows.append((field_names.get(key, key), le.text()))
+            metric_names = {'ey': 'Earnings Yield', 'roic': 'ROIC', 'ev_ebitda': 'EV/EBITDA'}
+            for key, lbl in self.res_labels.items():
+                eval_txt = self.res_eval_labels[key].text()
+                rows.append((metric_names.get(key, key), f"{lbl.text()} {eval_txt}".strip()))
+            rows.append(("Punteggio Value", self.lbl_score.text()))
+            rows.append(("Verdetto Value", self.lbl_recommendation.text()))
+            opp_names = {'pe': 'P/E (Occasioni)', 'ps': 'P/S (Occasioni)',
+                         'peg': 'PEG (Occasioni)', 'ev_ebitda_occ': 'EV/EBITDA (Occasioni)'}
+            for key, lbl in self.opp_labels.items():
+                eval_txt = self.opp_eval_labels[key].text()
+                rows.append((opp_names.get(key, key), f"{lbl.text()} {eval_txt}".strip()))
+            rows.append(("Punteggio Occasioni", self.lbl_opp_score.text()))
+            rows.append(("Verdetto Occasioni", self.lbl_opp_recommendation.text()))
+        else:
+            rows.append(("Tipo", "ETF"))
+            rows.append(("Ticker/ISIN", self.input_ticker.text().strip()))
+            rows.append(("Fondo", self.lbl_etf_name.text().replace("Fondo/ETF: ", "")))
+            rows.append(("Replicazione", self.lbl_etf_repl.text().replace("Replicazione: ", "")))
+            etf_names = {'ter': 'TER (%)', 'aum': 'AUM (Milioni)',
+                         'ret_1y': 'Rendimento 1Y (%)', 'ret_3y': 'Rendimento 3Y (%)'}
+            for key, le in self.etf_inputs.items():
+                rows.append((etf_names.get(key, key), le.text()))
+            res_names = {'ter': 'Costi TER', 'aum': 'Asset Gestiti', 'ret_1y': 'Rendimento Anno'}
+            for key, lbl in self.etf_res_labels.items():
+                eval_txt = self.etf_eval_labels[key].text()
+                rows.append((res_names.get(key, key), f"{lbl.text()} {eval_txt}".strip()))
+            rows.append(("Punteggio ETF", self.lbl_etf_score.text()))
+            rows.append(("Giudizio ETF", self.lbl_etf_recommendation.text()))
+        return rows
+
+    def _export_csv(self) -> None:
+        """Esporta l'analisi corrente in un file CSV (separatore ; per Excel)."""
+        ticker = self.input_ticker.text().strip() or "analisi"
+        default_name = f"QuantumValue_{ticker}.csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Esporta Analisi CSV", default_name, "File CSV (*.csv)")
+        if not path:
+            return
+        try:
+            rows = self._collect_export_rows()
+            # utf-8-sig + ';' per compatibilita' diretta con Excel in locale italiano
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                csv.writer(f, delimiter=";").writerows(rows)
+            self.statusBar().showMessage(f"Analisi esportata in: {path}")
+        except OSError as e:
+            QMessageBox.critical(self, "Errore Esportazione",
+                                 f"Impossibile scrivere il file:\n{str(e)}")
 
     def _check_for_updates(self, silent: bool = True) -> None:
         if not silent:
@@ -378,6 +623,12 @@ class MainWindow(QMainWindow):
         self.input_ticker.setMaximumWidth(320)
         self.input_ticker.textChanged.connect(self._force_uppercase_ticker)
         self.input_ticker.returnPressed.connect(self._on_search_requested)
+
+        # Suggerimenti automatici dai ticker recenti
+        self.completer_model = QStringListModel(self.recent_tickers)
+        completer = QCompleter(self.completer_model, self)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.input_ticker.setCompleter(completer)
         search_layout.addWidget(self.input_ticker)
 
         self.btn_fetch = QPushButton(" Cerca/Scarica Dati")
@@ -418,7 +669,8 @@ class MainWindow(QMainWindow):
         grid_layout = QGridLayout(input_group)
 
         self.lbl_company_name = QLabel("Azienda: --")
-        self.lbl_company_name.setStyleSheet("color: #2980b9; font-weight: bold; font-size: 14px;")
+        self.lbl_company_name.setStyleSheet(
+            f"color: {theme.color('accent')}; font-weight: bold; font-size: 14px;")
         grid_layout.addWidget(self.lbl_company_name, 0, 0, 1, 5)
 
         price_layout = QHBoxLayout()
@@ -441,6 +693,10 @@ class MainWindow(QMainWindow):
         price_layout.addSpacing(25)
         price_layout.addLayout(var_layout)
         price_layout.addStretch()
+
+        # Mini-grafico dell'andamento del prezzo nell'ultimo anno
+        self.sparkline = SparklineWidget()
+        price_layout.addWidget(self.sparkline)
         grid_layout.addLayout(price_layout, 1, 0, 1, 5)
 
         grid_layout.setColumnStretch(4, 1)
@@ -457,7 +713,11 @@ class MainWindow(QMainWindow):
             le = QLineEdit()
             le.setMaximumWidth(160)
             le.textChanged.connect(self._on_input_changed)
-            grid_layout.addWidget(QLabel(text), row, col)
+            lbl = QLabel(text)
+            if key in METRIC_TOOLTIPS:
+                lbl.setToolTip(METRIC_TOOLTIPS[key])
+                le.setToolTip(METRIC_TOOLTIPS[key])
+            grid_layout.addWidget(lbl, row, col)
             grid_layout.addWidget(le, row, col + 1)
             self.inputs[key] = le
 
@@ -470,11 +730,12 @@ class MainWindow(QMainWindow):
         grid_layout = QGridLayout(input_group)
 
         self.lbl_etf_name = QLabel("Fondo/ETF: --")
-        self.lbl_etf_name.setStyleSheet("color: #8e44ad; font-weight: bold; font-size: 14px;")
+        self.lbl_etf_name.setStyleSheet(
+            f"color: {theme.color('accent_etf')}; font-weight: bold; font-size: 14px;")
         grid_layout.addWidget(self.lbl_etf_name, 0, 0, 1, 5)
 
         self.lbl_etf_repl = QLabel("Replicazione: --")
-        self.lbl_etf_repl.setStyleSheet("color: #7f8c8d; font-size: 11px;")
+        self.lbl_etf_repl.setStyleSheet(f"color: {theme.color('muted')}; font-size: 11px;")
         grid_layout.addWidget(self.lbl_etf_repl, 1, 0, 1, 5)
 
         grid_layout.setColumnStretch(4, 1)
@@ -489,7 +750,11 @@ class MainWindow(QMainWindow):
             le = QLineEdit()
             le.setMaximumWidth(160)
             le.textChanged.connect(self._on_etf_input_changed)
-            grid_layout.addWidget(QLabel(text), row, col)
+            lbl = QLabel(text)
+            if key in METRIC_TOOLTIPS:
+                lbl.setToolTip(METRIC_TOOLTIPS[key])
+                le.setToolTip(METRIC_TOOLTIPS[key])
+            grid_layout.addWidget(lbl, row, col)
             grid_layout.addWidget(le, row, col + 1)
             self.etf_inputs[key] = le
 
@@ -504,7 +769,9 @@ class MainWindow(QMainWindow):
 
         for key, title in [('ey', 'Earnings Yield:'), ('roic', 'ROIC:'), ('ev_ebitda', 'EV/EBITDA:')]:
             row_layout = QHBoxLayout()
-            row_layout.addWidget(QLabel(title))
+            lbl_title = QLabel(title)
+            lbl_title.setToolTip(METRIC_TOOLTIPS.get(key, ""))
+            row_layout.addWidget(lbl_title)
             lbl_val = QLabel("--")
             lbl_val.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
             row_layout.addWidget(lbl_val)
@@ -541,7 +808,9 @@ class MainWindow(QMainWindow):
                    ('peg', 'PEG (P/E to Growth):'), ('ev_ebitda_occ', 'EV/EBITDA:')]
         for key, title in metrics:
             row_layout = QHBoxLayout()
-            row_layout.addWidget(QLabel(title))
+            lbl_title = QLabel(title)
+            lbl_title.setToolTip(METRIC_TOOLTIPS.get('ev_ebitda' if key == 'ev_ebitda_occ' else key, ""))
+            row_layout.addWidget(lbl_title)
             lbl_val = QLabel("--")
             lbl_val.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
             row_layout.addWidget(lbl_val)
@@ -576,7 +845,9 @@ class MainWindow(QMainWindow):
 
         for key, title in [('ter', 'Costi TER:'), ('aum', 'Asset Gestiti (AUM):'), ('ret_1y', 'Rendimento Anno:')]:
             row_layout = QHBoxLayout()
-            row_layout.addWidget(QLabel(title))
+            lbl_title = QLabel(title)
+            lbl_title.setToolTip(METRIC_TOOLTIPS.get(key, ""))
+            row_layout.addWidget(lbl_title)
             lbl_val = QLabel("--")
             lbl_val.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
             row_layout.addWidget(lbl_val)
@@ -618,6 +889,7 @@ class MainWindow(QMainWindow):
 
         if self.rb_azione.isChecked():
             self.lbl_price.setText("Prezzo: --")
+            self.sparkline.clear()
             for lbl in (self.lbl_var_1d, self.lbl_var_1w, self.lbl_var_1m, self.lbl_var_1y):
                 lbl.setText("--")
 
@@ -696,6 +968,7 @@ class MainWindow(QMainWindow):
             prices: Dict[str, float] = data.pop('prices', {})
             curr: float = prices.get('current', 0.0)
             self.lbl_price.setText(f"Prezzo: {curr:.2f} {self.currency_symbol}")
+            self.sparkline.set_points(data.pop('sparkline', []))
 
             def set_variation_label(lbl: QLabel, current: float, past: float) -> None:
                 if past > 0 and past != current:
@@ -707,7 +980,7 @@ class MainWindow(QMainWindow):
                     lbl.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 11px;")
                 else:
                     lbl.setText("--")
-                    lbl.setStyleSheet("color: #7f8c8d;")
+                    lbl.setStyleSheet(f"color: {theme.color('muted')};")
 
             set_variation_label(self.lbl_var_1d, curr, prices.get('1d', curr))
             set_variation_label(self.lbl_var_1w, curr, prices.get('1w', curr))
@@ -723,6 +996,7 @@ class MainWindow(QMainWindow):
 
             logger.debug("Chiamata al ricalcolo delle metriche di screening (_on_input_changed).")
             self._on_input_changed()
+            self._add_recent_ticker(self.input_ticker.text())
             self.btn_fetch.setEnabled(True)
             self.statusBar().showMessage("Dati scaricati e processati con successo.")
             logger.info("Rendering dell'interfaccia azionaria completato con totale successo.")
@@ -766,7 +1040,7 @@ class MainWindow(QMainWindow):
             lbl = self.res_labels[k]
             if isinstance(v, (int, float)):
                 lbl.setText(f"{v:.2f}{suf}")
-                lbl.setStyleSheet("color: #222f3e;")
+                lbl.setStyleSheet(f"color: {theme.color('value')};")
             else:
                 lbl.setText(str(v))
                 lbl.setStyleSheet("color: #e74c3c; font-size: 11px;")
@@ -779,7 +1053,7 @@ class MainWindow(QMainWindow):
             lbl = self.opp_labels[k]
             if v > 0:
                 lbl.setText(f"{v:.2f}{suf}")
-                lbl.setStyleSheet("color: #222f3e;")
+                lbl.setStyleSheet(f"color: {theme.color('value')};")
             else:
                 lbl.setText("N.D.")
                 lbl.setStyleSheet("color: #e74c3c; font-size: 11px;")
@@ -791,7 +1065,7 @@ class MainWindow(QMainWindow):
         lbl_ev_occ = self.opp_labels['ev_ebitda_occ']
         if isinstance(ev_eb, (int, float)):
             lbl_ev_occ.setText(f"{ev_eb:.2f}x")
-            lbl_ev_occ.setStyleSheet("color: #222f3e;")
+            lbl_ev_occ.setStyleSheet(f"color: {theme.color('value')};")
         else:
             lbl_ev_occ.setText("N.D.")
             lbl_ev_occ.setStyleSheet("color: #e74c3c; font-size: 11px;")
@@ -839,6 +1113,7 @@ class MainWindow(QMainWindow):
             for le in self.etf_inputs.values(): le.blockSignals(False)
 
             self._on_etf_input_changed()
+            self._add_recent_ticker(self.input_ticker.text())
             self.btn_fetch.setEnabled(True)
             self.statusBar().showMessage("Dati ETF estratti con successo.")
             logger.info("Rendering dell'interfaccia ETF completato con totale successo.")
@@ -888,18 +1163,18 @@ class MainWindow(QMainWindow):
         for lbl in self.opp_labels.values(): lbl.setText("--")
         for lbl in self.opp_eval_labels.values(): lbl.setText("")
         self.lbl_score.setText("- / 10")
-        self.lbl_score.setStyleSheet("color: #7f8c8d;")
+        self.lbl_score.setStyleSheet(f"color: {theme.color('muted')};")
         self.lbl_recommendation.setText("Dati incompleti o errati.")
-        self.lbl_recommendation.setStyleSheet("color: #7f8c8d;")
+        self.lbl_recommendation.setStyleSheet(f"color: {theme.color('muted')};")
         self.lbl_opp_score.setText("- / 10")
-        self.lbl_opp_score.setStyleSheet("color: #7f8c8d;")
+        self.lbl_opp_score.setStyleSheet(f"color: {theme.color('muted')};")
         self.lbl_opp_recommendation.setText("Dati incompleti o errati.")
-        self.lbl_opp_recommendation.setStyleSheet("color: #7f8c8d;")
+        self.lbl_opp_recommendation.setStyleSheet(f"color: {theme.color('muted')};")
 
     def _reset_etf_results(self) -> None:
         for lbl in self.etf_res_labels.values(): lbl.setText("--")
         for lbl in self.etf_eval_labels.values(): lbl.setText("")
         self.lbl_etf_score.setText("- / 10")
-        self.lbl_etf_score.setStyleSheet("color: #7f8c8d;")
+        self.lbl_etf_score.setStyleSheet(f"color: {theme.color('muted')};")
         self.lbl_etf_recommendation.setText("Dati incompleti o errati.")
-        self.lbl_etf_recommendation.setStyleSheet("color: #7f8c8d;")
+        self.lbl_etf_recommendation.setStyleSheet(f"color: {theme.color('muted')};")

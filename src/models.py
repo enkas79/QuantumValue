@@ -5,7 +5,7 @@ Contiene le regole matematiche di calcolo finanziario, gli algoritmi di screenin
 el caching dei dati e l'estrazione dati dai provider (Yahoo Finance, FMP).
 
 Autore: Enrico Martini
-Versione: 0.7.7
+Versione: 0.7.8
 """
 
 import sys
@@ -489,6 +489,7 @@ class FinancialDataFetcher:
         # Recupera lo storico dei prezzi
         hist = ticker.history(period="1y")
         prices: Dict[str, float] = {'current': 0.0, '1d': 0.0, '1w': 0.0, '1m': 0.0, '1y': 0.0}
+        sparkline: List[float] = []
 
         if not hist.empty:
             closes = hist['Close']
@@ -497,6 +498,14 @@ class FinancialDataFetcher:
             prices['1w'] = float(closes.iloc[-6]) if len(closes) >= 6 else prices['current']
             prices['1m'] = float(closes.iloc[-22]) if len(closes) >= 22 else prices['current']
             prices['1y'] = float(closes.iloc[0]) if len(closes) > 0 else prices['current']
+
+            # Serie ridotta (max ~60 punti) per il mini-grafico dell'ultimo anno.
+            # Lista di float puri: serializzabile in cache JSON senza pandas.
+            values = [float(v) for v in closes.tolist() if v == v]
+            step = max(1, len(values) // 60)
+            sparkline = values[::step]
+            if values and (not sparkline or sparkline[-1] != values[-1]):
+                sparkline.append(values[-1])
 
         pe: float = float(info.get('trailingPE', 0.0) or 0.0)
         ps: float = float(info.get('priceToSalesTrailing12Months', 0.0) or 0.0)
@@ -550,8 +559,9 @@ class FinancialDataFetcher:
         return {
             'company_name': info.get('longName', ticker_symbol),
             'currency': info.get('currency', 'USD'),
-            'prices': prices, 
-            'ebit': ebit, 
+            'prices': prices,
+            'sparkline': sparkline,
+            'ebit': ebit,
             'ev': ev, 
             'nopat': nopat,
             'invested_capital': invested_capital, 

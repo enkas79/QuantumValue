@@ -1,5 +1,5 @@
 # Dipendenze per QuantumValue Analysis
-# Versione: 0.7.7
+# Versione: 0.7.8
 
 # Interfaccia Grafica
 PyQt6==6.4.0
@@ -13,6 +13,9 @@ requests==2.31.0
 httpx==0.25.0
 tenacity==8.2.2
 cryptography==41.0.7
+
+# Salvataggio sicuro della API key nel portachiavi di sistema
+keyring==24.3.0
 
 # Test (opzionale per sviluppo)
 pytest==7.4.0

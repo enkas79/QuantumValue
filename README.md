@@ -37,7 +37,15 @@ Nessun blocco se un provider fallisce. Il sistema tenta prima il recupero dati l
 
 ### 🔄 5. Sistema OTA (Over-The-Air) e CI/CD
 * **Auto-Update Integrato:** Il software interroga le API di GitHub all'avvio. Se trova una nuova release, mostra una notifica e scarica l'aggiornamento in background tramite una progress bar dedicata, auto-installandolo.
-* **Pipeline GitHub Actions:** La compilazione (PyInstaller), la creazione del Setup (Inno Setup) e il rilascio della Release pubblica sono **100% automatizzati**. Basta aggiornare il file `version.txt` e fare push.
+* **Pipeline GitHub Actions:** La compilazione (PyInstaller), la creazione del Setup (Inno Setup per Windows, `.deb` per Linux, bundle `.app` per macOS) e il rilascio della Release pubblica — con **changelog generato automaticamente dai commit** — sono **100% automatizzati**. Basta aggiornare il file `version.txt` e fare push.
+
+### ✨ 6. Esperienza d'Uso
+* **Tema Chiaro/Scuro:** selezionabile dal menu *Visualizza*, salvato nelle preferenze e sempre coerente indipendentemente dal tema del sistema operativo.
+* **Mini-grafico prezzo (sparkline):** andamento dell'ultimo anno accanto al prezzo, senza dipendenze grafiche aggiuntive.
+* **Ticker Recenti:** cronologia degli ultimi titoli analizzati (menu *File* e suggerimenti automatici nel campo di ricerca).
+* **Esportazione CSV:** l'analisi corrente (dati, metriche e verdetti) si esporta da *File > Esporta Analisi*.
+* **Tooltip esplicativi:** ogni metrica mostra al passaggio del mouse la formula e la soglia ideale.
+* **API Key nel portachiavi di sistema:** la chiave FMP è salvata tramite `keyring` (Credential Manager di Windows, Keychain di macOS, Secret Service su Linux), con migrazione automatica dal vecchio salvataggio offuscato.
 
 ---
 
@@ -46,6 +54,7 @@ Nessun blocco se un provider fallisce. Il sistema tenta prima il recupero dati l
 Il codice è scritto aderendo rigorosamente agli standard **PEP 8**, alla tipizzazione forte (**Type Hints**) e implementando il pattern architetturale **MVC (Model-View-Controller)**:
 
 * **`config.py`**: Costanti globali, mappature borse e lettura dinamica della versione tramite file iniettato.
+* **`theme.py`**: Palette e stylesheet dei temi chiaro/scuro, applicati a livello di applicazione (coprono anche i dialoghi).
 * **`models.py` (Model)**: Contiene l'ingegneria finanziaria, le formule, le classi di scraping e la logica di valutazione. Nessuna dipendenza dalla GUI.
 * **`controllers.py` (Controller)**: Gestisce l'asincronia. Implementa classi derivate da `QThread` (PyQt6) per demandare a thread in background i task pesanti (download dati, ricerca, aggiornamenti OTA), mantenendo la UI sempre fluida (nessun freeze).
 * **`views.py` (View)**: Interfaccia utente costruita in PyQt6. Gestisce finestre, layout dinamici (QStackedWidget per lo switch Azioni/ETF), formattazione visiva e finestre di dialogo.

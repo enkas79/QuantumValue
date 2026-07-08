@@ -1,4 +1,4 @@
-name: Build QuantumValue (Windows & Linux)
+name: Build QuantumValue (Windows, Linux & macOS)
 
 on:
   push:
@@ -22,12 +22,34 @@ jobs:
     steps:
     - name: Checkout del codice
       uses: actions/checkout@v4
+      with:
+        # Storia completa e tag: servono per generare il changelog
+        fetch-depth: 0
 
     - name: Leggi la versione da version.txt
       shell: bash
       run: |
         VERSION=$(cat src/version.txt)
         echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+    - name: Genera changelog dai commit
+      shell: bash
+      run: |
+        # Ultimo tag precedente a questa versione (se esiste)
+        PREV_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -v "^v${VERSION}$" | head -1 || true)
+        {
+          echo "## Novità della versione ${VERSION}"
+          echo ""
+          if [ -n "$PREV_TAG" ]; then
+            git log --pretty="- %s" "${PREV_TAG}..HEAD" | head -50
+          else
+            git log --pretty="- %s" -20
+          fi
+          echo ""
+          echo "---"
+          echo "Scarica qui sotto la versione per il tuo sistema operativo."
+        } > CHANGELOG_RELEASE.md
+        cat CHANGELOG_RELEASE.md
 
     - name: Installazione Python
       uses: actions/setup-python@v5
@@ -37,7 +59,7 @@ jobs:
     - name: Installazione Librerie
       run: |
         python -m pip install --upgrade pip
-        pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography
+        pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography keyring
 
     - name: Creazione Cartella Eseguibile (PyInstaller)
       shell: bash
@@ -122,7 +144,7 @@ jobs:
       with:
         tag_name: v${{ env.VERSION }}
         name: QuantumValue Analysis v${{ env.VERSION }}
-        body: "Aggiornamento rilasciato. Scarica la versione per il tuo sistema operativo!"
+        body_path: CHANGELOG_RELEASE.md
         files: Output_Installer/QuantumValue_Analysis_Setup_v${{ env.VERSION }}.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -156,7 +178,7 @@ jobs:
     - name: Installazione Librerie
       run: |
         python -m pip install --upgrade pip
-        pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography
+        pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography keyring
 
     - name: Creazione Eseguibile Linux (PyInstaller)
       shell: bash
@@ -242,5 +264,57 @@ jobs:
       with:
         tag_name: v${{ env.VERSION }}
         files: QuantumValue_Analysis_v${{ env.VERSION }}_amd64.deb
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  # ==========================================
+  # JOB 3: BUILD PER MACOS (.app in .zip)
+  # ==========================================
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - name: Checkout del codice
+      uses: actions/checkout@v4
+
+    - name: Leggi la versione da version.txt
+      shell: bash
+      run: |
+        VERSION=$(cat src/version.txt)
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+    - name: Installazione Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Installazione Librerie
+      run: |
+        python -m pip install --upgrade pip
+        pip install PyQt6 yfinance pandas requests pyinstaller httpx tenacity cryptography keyring
+
+    - name: Creazione Bundle macOS (PyInstaller)
+      shell: bash
+      run: |
+        cd src
+        # Nota: --windowed su macOS produce un bundle .app; l'icona .ico
+        # non e' supportata nativamente (servirebbe .icns), quindi si omette.
+        pyinstaller --onedir --windowed --name=QuantumValue_Analysis \
+          --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance \
+          --hidden-import=httpx --hidden-import=tenacity --hidden-import=cryptography \
+          --collect-all=yfinance --collect-all=PyQt6 --add-data "version.txt:." main.py
+
+    - name: Comprimi il bundle .app in .zip
+      shell: bash
+      run: |
+        # ditto preserva metadati e permessi del bundle macOS
+        ditto -c -k --keepParent "src/dist/QuantumValue_Analysis.app" \
+          "QuantumValue_Analysis_v${VERSION}_macOS.zip"
+
+    - name: Pubblica la Release su GitHub (macOS)
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ env.VERSION }}
+        files: QuantumValue_Analysis_v${{ env.VERSION }}_macOS.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
