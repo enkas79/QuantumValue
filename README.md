@@ -33,7 +33,7 @@ Analizza fondi passivi tramite scraping dedicato (`justetf_scraping`) o fallback
 * **Rendimenti Storici (1Y / 3Y):** Per valutare la bontà del trend.
 
 ### 🛡️ 4. Architettura Dati Resiliente (Airbag System)
-Nessun blocco se un provider fallisce. Il sistema tenta prima il recupero dati live tramite **Yahoo Finance**. In caso di dati mancanti (frequente sui listini europei come MIB30, DAX, CAC40), interviene un sistema di **Fallback automatico** che interroga le API di **Financial Modeling Prep (FMP)**.
+Nessun blocco se un provider fallisce. Il sistema tenta prima il recupero dati live tramite **Yahoo Finance**. In caso di dati mancanti (frequente sui listini europei come MIB30, DAX, CAC40), interviene un sistema di **Fallback automatico** che interroga le API di **Financial Modeling Prep (FMP)**. Se Yahoo è lento, il provider di riserva parte **in parallelo** (richieste *hedged*) e vince il primo risultato utile, riducendo l'attesa nel caso peggiore. I provider implementano un'interfaccia comune (`DataProvider`), quindi aggiungerne di nuovi non richiede modifiche alla logica di orchestrazione. I valori inseriti passano inoltre una **validazione di plausibilità**: i campi sospetti (errori di scala K/M/B, multipli fuori range) vengono evidenziati in arancione con spiegazione nel tooltip.
 
 ### 🔄 5. Sistema OTA (Over-The-Air) e CI/CD
 * **Auto-Update Integrato:** Il software interroga le API di GitHub all'avvio. Se trova una nuova release, mostra una notifica e scarica l'aggiornamento in background tramite una progress bar dedicata, auto-installandolo.

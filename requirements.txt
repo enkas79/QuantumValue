@@ -1,5 +1,5 @@
 # Dipendenze per QuantumValue Analysis
-# Versione: 0.7.8
+# Versione: 0.7.9
 
 # Interfaccia Grafica
 PyQt6==6.4.0
@@ -17,6 +17,8 @@ cryptography==41.0.7
 # Salvataggio sicuro della API key nel portachiavi di sistema
 keyring==24.3.0
 
-# Test (opzionale per sviluppo)
+# Test e qualita' (opzionale per sviluppo)
 pytest==7.4.0
 pytest-cov==4.1.0
+pytest-qt==4.4.0
+mypy==1.11.2

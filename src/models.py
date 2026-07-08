@@ -5,13 +5,16 @@ Contiene le regole matematiche di calcolo finanziario, gli algoritmi di screenin
 el caching dei dati e l'estrazione dati dai provider (Yahoo Finance, FMP).
 
 Autore: Enrico Martini
-Versione: 0.7.8
+Versione: 0.7.9
 """
 
 import sys
 import os
 import json
 import logging
+from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from dataclasses import dataclass, field, asdict, fields
 from typing import Dict, Union, Tuple, List, Any, Optional
 
 # Aggiungi la directory corrente al path per importare i moduli locali
@@ -39,6 +42,129 @@ from cache import get_cached, set_cached
 # Margine predefinito per approssimare EBIT da EBITDA
 DEFAULT_EBIT_MARGIN_PROX = config.DEFAULT_EBIT_MARGIN_PROX
 
+# Secondi di attesa sul provider primario prima di avviare in parallelo il
+# provider di riserva (pattern "hedged request"): limita la latenza quando
+# Yahoo e' lento senza sprecare quota FMP quando Yahoo risponde subito.
+HEDGE_DELAY_SECONDS: float = 6.0
+
+
+@dataclass
+class StockData:
+    """Dati fondamentali di un titolo azionario, tipizzati ai bordi del Model."""
+    company_name: str = "N/A"
+    currency: str = "USD"
+    prices: Dict[str, float] = field(default_factory=dict)
+    sparkline: List[float] = field(default_factory=list)
+    ebit: float = 0.0
+    ev: float = 0.0
+    nopat: float = 0.0
+    invested_capital: float = 0.0
+    ebitda: float = 0.0
+    pe: float = 0.0
+    ps: float = 0.0
+    peg: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializza in dizionario JSON-compatibile (per cache e fallback)."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "StockData":
+        """Costruisce l'oggetto da un dizionario, ignorando chiavi sconosciute."""
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+
+@dataclass
+class EtfData:
+    """Profilo analitico di un ETF, tipizzato ai bordi del Model."""
+    company_name: str = "N/A"
+    currency: str = "EUR"
+    replication: str = "N/A"
+    ter: float = 0.0
+    aum: float = 0.0
+    ret_1y: float = 0.0
+    ret_3y: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializza in dizionario JSON-compatibile (per cache)."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "EtfData":
+        """Costruisce l'oggetto da un dizionario, ignorando chiavi sconosciute."""
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+
+def validate_input_data(data: Dict[str, float]) -> Dict[str, str]:
+    """
+    Verifica la plausibilita' dei dati finanziari inseriti.
+
+    Non blocca il calcolo: restituisce avvisi per campo da mostrare come
+    warning visivo, cosi' l'utente si accorge di valori fuori scala (es.
+    errori di unita' K/M/B) prima di fidarsi del verdetto.
+
+    Args:
+        data (Dict[str, float]): Voci contabili grezze gia' parse-ate.
+
+    Returns:
+        Dict[str, str]: Mappa campo -> messaggio di avviso (vuota se tutto ok).
+    """
+    warnings: Dict[str, str] = {}
+    ev = data.get('ev', 0.0)
+    ebit = data.get('ebit', 0.0)
+    ebitda = data.get('ebitda', 0.0)
+    nopat = data.get('nopat', 0.0)
+    inv_cap = data.get('invested_capital', 0.0)
+    pe = data.get('pe', 0.0)
+    ps = data.get('ps', 0.0)
+    peg = data.get('peg', 0.0)
+
+    if ev <= 0:
+        warnings['ev'] = "EV non positivo: Earnings Yield e EV/EBITDA non sono calcolabili."
+    if inv_cap <= 0:
+        warnings['invested_capital'] = "Capitale Investito non positivo: ROIC non calcolabile."
+    if ev > 0 and ebit > ev:
+        warnings['ebit'] = "EBIT maggiore dell'EV: probabile errore di scala (K/M/B)."
+    if ebitda != 0 and abs(ebit) > abs(ebitda) * 1.5:
+        warnings['ebit'] = "EBIT molto superiore all'EBITDA: verifica le unita' di misura."
+    if inv_cap > 0 and nopat / inv_cap > 1.0:
+        warnings['nopat'] = "ROIC oltre il 100%: valore sospetto, verifica NOPAT e Capitale Investito."
+    if pe > 200:
+        warnings['pe'] = "P/E oltre 200: valore anomalo o utili prossimi allo zero."
+    if ps > 50:
+        warnings['ps'] = "P/S oltre 50: valore fuori scala per la maggior parte dei settori."
+    if peg > 10 or peg < 0:
+        warnings['peg'] = "PEG fuori dall'intervallo tipico (0-10): dato poco affidabile."
+    return warnings
+
+
+def pick_release_asset(assets: List[Dict[str, Any]], platform: str = sys.platform) -> str:
+    """
+    Sceglie dall'elenco degli asset di una GitHub Release quello adatto
+    alla piattaforma corrente.
+
+    Args:
+        assets: Lista di asset della release (API GitHub).
+        platform: Identificatore piattaforma (sys.platform).
+
+    Returns:
+        str: URL di download diretto, o stringa vuota se nessun asset combacia.
+    """
+    if platform.startswith("win"):
+        suffix = ".exe"
+    elif platform == "darwin":
+        suffix = "_macos.zip"
+    else:
+        suffix = ".deb"
+
+    for asset in assets:
+        name = str(asset.get('name', '')).lower()
+        if name.endswith(suffix):
+            return str(asset.get('browser_download_url', ''))
+    return ""
+
 
 # Decorator per retry con tenacity (fallback a requests se httpx non disponibile)
 def _retry_request(func):
@@ -59,13 +185,16 @@ def check_for_updates(current_version: str, repo_path: str) -> Tuple[bool, str, 
         repo_path (str): Path del repository GitHub (es. 'utente/repo').
 
     Returns:
-        Tuple[bool, str, str]: (aggiornamento_disponibile, tag_versione, url_html)
+        Tuple[bool, str, str]: (aggiornamento_disponibile, tag_versione, url_download).
+        L'URL punta all'asset della release adatto alla piattaforma corrente
+        (installer .exe, pacchetto .deb o bundle macOS), con fallback alla
+        pagina HTML della release se nessun asset combacia.
     """
     api_url: str = f"https://api.github.com/repos/{repo_path}/releases/latest"
     try:
         response = requests.get(
-            api_url, 
-            headers=config.HTTP_HEADERS, 
+            api_url,
+            headers=config.HTTP_HEADERS,
             timeout=config.HTTP_TIMEOUT
         )
         if response.status_code == 404:
@@ -73,7 +202,7 @@ def check_for_updates(current_version: str, repo_path: str) -> Tuple[bool, str, 
         response.raise_for_status()
         data: dict = response.json()
         latest_tag: str = data.get('tag_name', '').replace('v', '')
-        html_url: str = data.get('html_url', '')
+        html_url: str = pick_release_asset(data.get('assets', [])) or data.get('html_url', '')
 
         if not latest_tag:
             return False, current_version, ""
@@ -339,27 +468,27 @@ def _parse_perc(val: Any) -> float:
         return 0.0
 
 
-def fetch_etf_data(query: str) -> Dict[str, Any]:
+def fetch_etf_data(query: str) -> "EtfData":
     """
     Scarica i dati analitici dell'ETF indicato interrogando Yahoo Finance.
-    
+
     Args:
         query (str): Ticker, ISIN o nome ETF.
-    
+
     Returns:
-        Dict[str, Any]: Dati dell'ETF.
-    
+        EtfData: Dati dell'ETF.
+
     Raises:
         ValueError: Se l'ETF non viene trovato.
     """
     if not query:
         raise ValueError("Inserire un ISIN, Ticker o Nome ETF valido.")
-    
+
     # Prova prima con la cache
     cache_key = f"etf_{query.upper()}"
     cached_data = get_cached(cache_key)
     if cached_data:
-        return cached_data
+        return EtfData.from_dict(cached_data)
 
     try:
         ticker = yf.Ticker(query.upper())
@@ -371,111 +500,55 @@ def fetch_etf_data(query: str) -> Dict[str, Any]:
         ytd_ret = float(info.get('ytdReturn', 0.0) or 0.0) * 100
         ter_yf = float(info.get('annualReportExpenseRatio', 0.0) or info.get('yield', 0.0) or 0.0) * 100
 
-        result = {
-            'company_name': info.get('longName', query),
-            'currency': info.get('currency', 'USD'),
-            'ter': ter_yf,
-            'aum': total_assets / 1_000_000,  # Converti in milioni
-            'ret_1y': ytd_ret,
-            'ret_3y': float(info.get('threeYearAverageReturn', 0.0) or 0.0) * 100,
-            'replication': "Fisica/Sintetica (Dato YF non disponibile)"
-        }
-        
+        result = EtfData(
+            company_name=info.get('longName', query),
+            currency=info.get('currency', 'USD'),
+            ter=ter_yf,
+            aum=total_assets / 1_000_000,  # Converti in milioni
+            ret_1y=ytd_ret,
+            ret_3y=float(info.get('threeYearAverageReturn', 0.0) or 0.0) * 100,
+            replication="Fisica/Sintetica (Dato YF non disponibile)"
+        )
+
         # Salva in cache
-        set_cached(cache_key, result)
+        set_cached(cache_key, result.to_dict())
         return result
-        
+
     except Exception as e:
         raise ValueError(f"Impossibile trovare i dati dell'ETF tramite Yahoo Finance: {e}")
 
 
-class FinancialDataFetcher:
+class DataProvider(ABC):
     """
-    Classe Model con stato per l'estrazione dei dati azionari dai provider (Yahoo/FMP).
-    
-    Include:
-    - Caching locale dei dati
-    - Fallback multi-livello (Yahoo -> FMP -> Static)
-    - Gestione errori robusta
+    Interfaccia dei provider di dati fondamentali azionari.
+
+    Aggiungere un nuovo provider (es. Alpha Vantage) significa implementare
+    questa classe e inserirla nella catena di FinancialDataFetcher, senza
+    toccare la logica di orchestrazione.
     """
 
-    def __init__(self, fmp_api_key: str = "") -> None:
-        self.fmp_api_key: str = fmp_api_key
+    name: str = "base"
 
-    def fetch_data(self, ticker_symbol: str) -> Dict[str, Any]:
-        """
-        Recupera i dati fondamentali dell'azione dal miglior provider disponibile.
-        
-        Args:
-            ticker_symbol (str): Simbolo del ticker (es. "AAPL").
-        
-        Returns:
-            Dict[str, Any]: Dati finanziari completi.
-        
-        Raises:
-            ValueError: Se tutti i provider falliscono.
-        """
-        if not ticker_symbol:
-            raise ValueError("Inserire un Ticker valido.")
-        
-        ticker_upper = ticker_symbol.upper()
-        cache_key = f"stock_{ticker_upper}"
-        
-        # 1. Prova con la cache
-        cached_data = get_cached(cache_key)
-        if cached_data:
-            return cached_data
-        
-        # 2. Prova con Yahoo Finance
-        try:
-            data = self._fetch_from_yahoo(ticker_upper)
-            set_cached(cache_key, data)
-            return data
-        except Exception as yf_error:
-            logger = logging.getLogger("QuantumValue")
-            logger.warning(f"Yahoo Finance fallito per {ticker_upper}: {str(yf_error)}")
-            
-            # 3. Prova con FMP (se chiave configurata)
-            if self.fmp_api_key:
-                try:
-                    data = self._fetch_from_fmp(ticker_upper)
-                    set_cached(cache_key, data)
-                    return data
-                except Exception as fmp_error:
-                    logger.error(f"FMP fallito per {ticker_upper}: {str(fmp_error)}")
-                    
-                    # 4. Fallback a dati statici
-                    if ticker_upper in config.STATIC_FALLBACK:
-                        logger.warning(f"Utilizzo dati statici per {ticker_upper}")
-                        return config.STATIC_FALLBACK[ticker_upper]
-                    else:
-                        raise ValueError(
-                            f"Fallimento totale provider per {ticker_upper}.\n"
-                            f"Yahoo: {str(yf_error)}\n"
-                            f"FMP: {str(fmp_error)}\n"
-                            f"Nessun dato statico disponibile."
-                        )
-            else:
-                # 4. Fallback a dati statici (senza FMP)
-                if ticker_upper in config.STATIC_FALLBACK:
-                    logger.warning(f"Utilizzo dati statici per {ticker_upper}")
-                    return config.STATIC_FALLBACK[ticker_upper]
-                else:
-                    raise ValueError(
-                        f"Errore Yahoo Finance (Nessuna API di backup configurata): {str(yf_error)}\n"
-                        f"Nessun dato statico disponibile per {ticker_upper}."
-                    )
+    @abstractmethod
+    def fetch(self, ticker_symbol: str) -> StockData:
+        """Recupera i fondamentali del titolo; solleva eccezione in caso di errore."""
+
+
+class YahooProvider(DataProvider):
+    """Provider primario: Yahoo Finance via yfinance."""
+
+    name = "Yahoo Finance"
 
     @_retry_request
-    def _fetch_from_yahoo(self, ticker_symbol: str) -> Dict[str, Any]:
+    def fetch(self, ticker_symbol: str) -> StockData:
         """
         Recupera i dati da Yahoo Finance.
-        
+
         Args:
             ticker_symbol (str): Simbolo del ticker.
-        
+
         Returns:
-            Dict[str, Any]: Dati finanziari.
+            StockData: Dati finanziari.
         """
         ticker = yf.Ticker(ticker_symbol)
         info: dict = ticker.info
@@ -556,23 +629,32 @@ class FinancialDataFetcher:
 
         invested_capital: float = total_debt + equity
 
-        return {
-            'company_name': info.get('longName', ticker_symbol),
-            'currency': info.get('currency', 'USD'),
-            'prices': prices,
-            'sparkline': sparkline,
-            'ebit': ebit,
-            'ev': ev, 
-            'nopat': nopat,
-            'invested_capital': invested_capital, 
-            'ebitda': ebitda,
-            'pe': pe, 
-            'ps': ps, 
-            'peg': peg
-        }
+        return StockData(
+            company_name=info.get('longName', ticker_symbol),
+            currency=info.get('currency', 'USD'),
+            prices=prices,
+            sparkline=sparkline,
+            ebit=ebit,
+            ev=ev,
+            nopat=nopat,
+            invested_capital=invested_capital,
+            ebitda=ebitda,
+            pe=pe,
+            ps=ps,
+            peg=peg
+        )
+
+
+class FmpProvider(DataProvider):
+    """Provider di riserva: Financial Modeling Prep (richiede API key)."""
+
+    name = "FMP"
+
+    def __init__(self, api_key: str = "") -> None:
+        self.api_key: str = api_key
 
     @_retry_request
-    def _fetch_from_fmp(self, ticker_symbol: str) -> Dict[str, Any]:
+    def fetch(self, ticker_symbol: str) -> StockData:
         """
         Recupera i dati da Financial Modeling Prep (FMP).
 
@@ -580,9 +662,9 @@ class FinancialDataFetcher:
             ticker_symbol (str): Simbolo del ticker.
 
         Returns:
-            Dict[str, Any]: Dati finanziari.
+            StockData: Dati finanziari.
         """
-        if not self.fmp_api_key:
+        if not self.api_key:
             raise ValueError("Nessuna API Key FMP configurata.")
 
         base_url: str = "https://financialmodelingprep.com/api/v3"
@@ -594,7 +676,7 @@ class FinancialDataFetcher:
             with requests.Session() as session:
                 # Recupera il profilo aziendale
                 prof_resp = session.get(
-                    f"{base_url}/profile/{ticker_symbol}?apikey={self.fmp_api_key}",
+                    f"{base_url}/profile/{ticker_symbol}?apikey={self.api_key}",
                     timeout=config.HTTP_TIMEOUT
                 ).json()
                 if not prof_resp:
@@ -603,21 +685,21 @@ class FinancialDataFetcher:
 
                 # Recupera le metriche chiave
                 km_resp = session.get(
-                    f"{base_url}/key-metrics-ttm/{ticker_symbol}?apikey={self.fmp_api_key}",
+                    f"{base_url}/key-metrics-ttm/{ticker_symbol}?apikey={self.api_key}",
                     timeout=config.HTTP_TIMEOUT
                 ).json()
                 km: dict = km_resp[0] if km_resp else {}
 
                 # Recupera i ratios
                 ratios_resp = session.get(
-                    f"{base_url}/ratios-ttm/{ticker_symbol}?apikey={self.fmp_api_key}",
+                    f"{base_url}/ratios-ttm/{ticker_symbol}?apikey={self.api_key}",
                     timeout=config.HTTP_TIMEOUT
                 ).json()
                 ratios: dict = ratios_resp[0] if ratios_resp else {}
 
                 # Recupera il bilancio
                 inc_resp = session.get(
-                    f"{base_url}/income-statement/{ticker_symbol}?limit=1&apikey={self.fmp_api_key}",
+                    f"{base_url}/income-statement/{ticker_symbol}?limit=1&apikey={self.api_key}",
                     timeout=config.HTTP_TIMEOUT
                 ).json()
                 inc: dict = inc_resp[0] if inc_resp else {}
@@ -650,18 +732,124 @@ class FinancialDataFetcher:
                 '1y': curr_price
             }
 
-            return {
-                'company_name': profile.get('companyName', ticker_symbol),
-                'currency': profile.get('currency', 'USD'),
-                'prices': prices, 
-                'ebit': ebit, 
-                'ev': ev, 
-                'nopat': nopat,
-                'invested_capital': invested_capital, 
-                'ebitda': ebitda,
-                'pe': pe, 
-                'ps': ps, 
-                'peg': peg
-            }
+            return StockData(
+                company_name=profile.get('companyName', ticker_symbol),
+                currency=profile.get('currency', 'USD'),
+                prices=prices,
+                ebit=ebit,
+                ev=ev,
+                nopat=nopat,
+                invested_capital=invested_capital,
+                ebitda=ebitda,
+                pe=pe,
+                ps=ps,
+                peg=peg
+            )
         except requests.exceptions.RequestException as e:
             raise ValueError(f"Errore di rete FMP: {str(e)}")
+
+
+class FinancialDataFetcher:
+    """
+    Orchestratore dei provider di dati azionari (pattern Strategy).
+
+    Include:
+    - Caching locale dei dati
+    - Richieste "hedged": se il provider primario (Yahoo) non risponde entro
+      HEDGE_DELAY_SECONDS, il provider di riserva (FMP) parte in parallelo e
+      vince il primo risultato utile, riducendo l'attesa nel caso peggiore
+      senza sprecare quota FMP quando Yahoo risponde subito.
+    - Fallback finale a dati statici per i ticker piu' comuni
+    """
+
+    def __init__(self, fmp_api_key: str = "") -> None:
+        self.fmp_api_key: str = fmp_api_key
+
+    def _providers(self) -> List[DataProvider]:
+        """Catena ordinata dei provider disponibili (il primo e' il preferito)."""
+        providers: List[DataProvider] = [YahooProvider()]
+        if self.fmp_api_key:
+            providers.append(FmpProvider(self.fmp_api_key))
+        return providers
+
+    def fetch_data(self, ticker_symbol: str) -> StockData:
+        """
+        Recupera i dati fondamentali dell'azione dal miglior provider disponibile.
+
+        Args:
+            ticker_symbol (str): Simbolo del ticker (es. "AAPL").
+
+        Returns:
+            StockData: Dati finanziari completi.
+
+        Raises:
+            ValueError: Se tutti i provider falliscono.
+        """
+        if not ticker_symbol:
+            raise ValueError("Inserire un Ticker valido.")
+
+        ticker_upper = ticker_symbol.upper()
+        cache_key = f"stock_{ticker_upper}"
+        logger = logging.getLogger("QuantumValue")
+
+        # 1. Prova con la cache
+        cached_data = get_cached(cache_key)
+        if cached_data:
+            return StockData.from_dict(cached_data)
+
+        providers = self._providers()
+        primary = providers[0]
+        backup = providers[1] if len(providers) > 1 else None
+        errors: List[str] = []
+
+        # 2. Provider primario, con hedge sul provider di riserva se lento
+        executor = ThreadPoolExecutor(max_workers=2)
+        try:
+            primary_future = executor.submit(primary.fetch, ticker_upper)
+            try:
+                data = primary_future.result(timeout=HEDGE_DELAY_SECONDS)
+                set_cached(cache_key, data.to_dict())
+                return data
+            except FutureTimeoutError:
+                # Primario lento: non e' fallito, ma avviamo la riserva in parallelo
+                logger.info(f"{primary.name} lento per {ticker_upper}: avvio hedge su provider di riserva.")
+            except Exception as primary_error:
+                errors.append(f"{primary.name}: {str(primary_error)}")
+                logger.warning(f"{primary.name} fallito per {ticker_upper}: {str(primary_error)}")
+                primary_future = None  # type: ignore[assignment]
+
+            backup_future = executor.submit(backup.fetch, ticker_upper) if backup else None
+
+            # Il primario, se ancora in corsa, resta preferito
+            if primary_future is not None:
+                try:
+                    data = primary_future.result()
+                    set_cached(cache_key, data.to_dict())
+                    return data
+                except Exception as primary_error:
+                    errors.append(f"{primary.name}: {str(primary_error)}")
+                    logger.warning(f"{primary.name} fallito per {ticker_upper}: {str(primary_error)}")
+
+            # 3. Provider di riserva
+            if backup_future is not None and backup is not None:
+                try:
+                    data = backup_future.result()
+                    set_cached(cache_key, data.to_dict())
+                    return data
+                except Exception as backup_error:
+                    errors.append(f"{backup.name}: {str(backup_error)}")
+                    logger.error(f"{backup.name} fallito per {ticker_upper}: {str(backup_error)}")
+        finally:
+            # Non attende gli hedge ancora in volo: il loro risultato non serve piu'
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        # 4. Fallback a dati statici
+        if ticker_upper in config.STATIC_FALLBACK:
+            logger.warning(f"Utilizzo dati statici per {ticker_upper}")
+            return StockData.from_dict(config.STATIC_FALLBACK[ticker_upper])
+
+        detail = "\n".join(errors) if errors else "Nessun provider disponibile."
+        raise ValueError(
+            f"Fallimento totale provider per {ticker_upper}.\n{detail}\n"
+            f"Nessun dato statico disponibile."
+        )

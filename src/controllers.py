@@ -5,13 +5,13 @@ Gestisce tutti i task asincroni interfacciando le funzioni pure
 del Model con la View (GUI), eliminando ogni classe fittizia intermedia.
 
 Autore: Enrico Martini
-Versione: 0.7.8
+Versione: 0.7.9
 """
 
 import asyncio
 import sys
 import os
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple
 from PyQt6.QtCore import QThread, pyqtSignal, QObject
 
 # Aggiungi la directory corrente al path per importare i moduli locali
@@ -74,7 +74,7 @@ class FetchWorker(QThread):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            data: Dict[str, Any] = self.fetcher.fetch_data(self.ticker)
+            data: models.StockData = self.fetcher.fetch_data(self.ticker)
             self.finished.emit(data)
         except ValueError as e:
             self.error.emit(str(e))
@@ -98,7 +98,7 @@ class EtfFetchWorker(QThread):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            data: Dict[str, Any] = models.fetch_etf_data(self.query)
+            data: models.EtfData = models.fetch_etf_data(self.query)
             self.finished.emit(data)
         except ValueError as e:
             self.error.emit(str(e))

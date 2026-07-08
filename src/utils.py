@@ -5,7 +5,7 @@ Contiene funzioni pure di supporto, gestione globale delle eccezioni
 e inizializzazione del sistema di logging accoppiato su file in area sicura.
 
 Autore: Enrico Martini
-Versione: 0.7.8
+Versione: 0.7.9
 """
 
 import os

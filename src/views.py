@@ -408,26 +408,34 @@ class MainWindow(QMainWindow):
         reset_api_action.triggered.connect(self._reset_api_key)
         file_menu.addAction(reset_api_action)
         file_menu.addSeparator()
-        file_menu.addAction(QAction("&Esci", self, triggered=self.close))
+        exit_action = QAction("&Esci", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
 
         # Menu Visualizza: scelta del tema chiaro/scuro
         view_menu = menu_bar.addMenu("&Visualizza")
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)
         for label, name in [("Tema &Chiaro", "light"), ("Tema &Scuro", "dark")]:
-            action = QAction(label, self, checkable=True)
+            action = QAction(label, self)
+            action.setCheckable(True)
             action.setChecked(theme.current_theme() == name)
             action.triggered.connect(lambda _checked, n=name: self._set_theme(n))
             theme_group.addAction(action)
             view_menu.addAction(action)
 
         help_menu = menu_bar.addMenu("&?")
-        help_menu.addAction(
-            QAction("&Verifica Aggiornamenti", self, triggered=lambda: self._check_for_updates(silent=False)))
+        update_action = QAction("&Verifica Aggiornamenti", self)
+        update_action.triggered.connect(lambda: self._check_for_updates(silent=False))
+        help_menu.addAction(update_action)
         help_menu.addSeparator()
-        help_menu.addAction(QAction("&Guida Metriche", self, triggered=lambda: GuideDialog(self).exec()))
+        guide_action = QAction("&Guida Metriche", self)
+        guide_action.triggered.connect(lambda: GuideDialog(self).exec())
+        help_menu.addAction(guide_action)
         help_menu.addSeparator()
-        help_menu.addAction(QAction("&Info", self, triggered=lambda: InfoDialog(self).exec()))
+        info_action = QAction("&Info", self)
+        info_action.triggered.connect(lambda: InfoDialog(self).exec())
+        help_menu.addAction(info_action)
 
     def _reset_api_key(self) -> None:
         utils.delete_api_key(self.settings)
@@ -487,7 +495,7 @@ class MainWindow(QMainWindow):
     def _set_theme(self, name: str) -> None:
         """Applica il tema scelto, lo salva nelle preferenze e aggiorna i colori dinamici."""
         app = QApplication.instance()
-        if app:
+        if isinstance(app, QApplication):
             theme.apply_theme(app, name)
         self.settings.setValue("theme", name)
         self._refresh_theme_colors()
@@ -592,11 +600,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Nuovo aggiornamento disponibile: v{new_version}")
             reply = QMessageBox.question(
                 self, "Aggiornamento Disponibile",
-                f"È disponibile la versione <b>v{new_version}</b>.<br><br>Vuoi andare alla pagina di download?",
+                f"È disponibile la versione <b>v{new_version}</b>.<br><br>"
+                f"Vuoi scaricare l'aggiornamento per il tuo sistema operativo?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply == QMessageBox.StandardButton.Yes:
-                QDesktopServices.openUrl(QUrl("https://mindnetwork.vip/download.php"))
+                # URL dell'asset di release adatto alla piattaforma (da GitHub);
+                # fallback alla pagina delle release del repository
+                url = download_url or f"https://github.com/{GITHUB_REPO}/releases/latest"
+                QDesktopServices.openUrl(QUrl(url))
         elif not silent:
             QMessageBox.information(self, "Nessun Aggiornamento", "Stai già utilizzando la versione più recente.")
             self.statusBar().showMessage("Software aggiornato.")
@@ -955,20 +967,20 @@ class MainWindow(QMainWindow):
         self.fetch_worker.error.connect(self.fetch_worker.deleteLater)
         self.fetch_worker.start()
 
-    def _on_fetch_success(self, data: Dict[str, Any]) -> None:
+    def _on_fetch_success(self, data: models.StockData) -> None:
         import logging
         import traceback
         logger = logging.getLogger("QuantumValue")
-        logger.info("Worker di background terminato. Ricezione dizionario dati fondamentali avviata.")
+        logger.info("Worker di background terminato. Ricezione dati fondamentali avviata.")
 
         try:
-            self.lbl_company_name.setText(f"Azienda: {data.pop('company_name', 'N/A')}")
-            self.currency_symbol = data.pop('currency', '$')
+            self.lbl_company_name.setText(f"Azienda: {data.company_name}")
+            self.currency_symbol = data.currency
 
-            prices: Dict[str, float] = data.pop('prices', {})
+            prices: Dict[str, float] = data.prices
             curr: float = prices.get('current', 0.0)
             self.lbl_price.setText(f"Prezzo: {curr:.2f} {self.currency_symbol}")
-            self.sparkline.set_points(data.pop('sparkline', []))
+            self.sparkline.set_points(data.sparkline)
 
             def set_variation_label(lbl: QLabel, current: float, past: float) -> None:
                 if past > 0 and past != current:
@@ -988,9 +1000,10 @@ class MainWindow(QMainWindow):
             set_variation_label(self.lbl_var_1y, curr, prices.get('1y', curr))
 
             logger.debug("Iniezione dei valori numerici all'interno delle QLineEdit della maschera.")
+            numeric_values = data.to_dict()
             for le in self.inputs.values(): le.blockSignals(True)
-            for key, value in data.items():
-                if key in self.inputs and (isinstance(value, float) or isinstance(value, int)):
+            for key, value in numeric_values.items():
+                if key in self.inputs and isinstance(value, (int, float)):
                     self.inputs[key].setText(utils.format_to_string(float(value)))
             for le in self.inputs.values(): le.blockSignals(False)
 
@@ -1023,6 +1036,7 @@ class MainWindow(QMainWindow):
             for k, e in self.inputs.items():
                 val_data[k] = utils.parse_to_float(e.text())
 
+            self._apply_input_warnings(models.validate_input_data(val_data))
             results_core = models.calculate_metrics(val_data)
             self._display_results(results_core, val_data)
         except ValueError:
@@ -1031,6 +1045,23 @@ class MainWindow(QMainWindow):
             error_trace = traceback.format_exc()
             logger.error(f"Errore generico silenziato durante il calcolo dinamico delle formule:\n{error_trace}")
             self._reset_results()
+
+    def _apply_input_warnings(self, warnings: Dict[str, str]) -> None:
+        """
+        Evidenzia in arancione i campi con valori sospetti (validazione di
+        plausibilita') e ne spiega il motivo nel tooltip; ripristina lo stile
+        e il tooltip originali sui campi tornati validi.
+        """
+        for key, le in self.inputs.items():
+            if key in warnings:
+                le.setStyleSheet(f"border: 2px solid {COLORS['fair']};")
+                le.setToolTip(warnings[key])
+            else:
+                le.setStyleSheet("")
+                le.setToolTip(METRIC_TOOLTIPS.get(key, ""))
+        if warnings:
+            self.statusBar().showMessage(
+                f"Attenzione: {len(warnings)} valori sospetti evidenziati (passaci sopra col mouse).")
 
     def _display_results(self, results_core: Dict[str, Union[float, str]], raw_data: Dict[str, float]) -> None:
         ey, roic, ev_eb = results_core.get('ey', 0.0), results_core.get('roic', 0.0), results_core.get('ev_ebitda', 0.0)
@@ -1092,20 +1123,21 @@ class MainWindow(QMainWindow):
                 self.opp_eval_labels[k].setText(opp_evals[k]['text'])
                 self.opp_eval_labels[k].setStyleSheet(f"color: {opp_evals[k]['color']};")
 
-    def _on_etf_fetch_success(self, data: Dict[str, Any]) -> None:
+    def _on_etf_fetch_success(self, data: models.EtfData) -> None:
         import logging
         import traceback
         logger = logging.getLogger("QuantumValue")
         logger.info("Dati ETF ricevuti dal Worker di background.")
 
         try:
-            self.lbl_etf_name.setText(f"Fondo/ETF: {data.pop('company_name', 'N/A')}")
-            self.lbl_etf_repl.setText(f"Replicazione: {data.pop('replication', 'N/A')}")
-            self.currency_symbol = data.pop('currency', 'EUR')
+            self.lbl_etf_name.setText(f"Fondo/ETF: {data.company_name}")
+            self.lbl_etf_repl.setText(f"Replicazione: {data.replication}")
+            self.currency_symbol = data.currency
 
+            numeric_values = data.to_dict()
             for le in self.etf_inputs.values(): le.blockSignals(True)
-            for key, value in data.items():
-                if key in self.etf_inputs and (isinstance(value, float) or isinstance(value, int)):
+            for key, value in numeric_values.items():
+                if key in self.etf_inputs and isinstance(value, (int, float)):
                     if key == 'aum':
                         self.etf_inputs[key].setText(f"{float(value):.2f}")
                     else:
