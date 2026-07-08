@@ -5,7 +5,7 @@ Contiene funzioni pure di supporto, gestione globale delle eccezioni
 e inizializzazione del sistema di logging accoppiato su file in area sicura.
 
 Autore: Enrico Martini
-Versione: 0.7.0
+Versione: 0.7.6
 """
 
 import os
@@ -67,7 +67,11 @@ def setup_logging() -> None:
     threading.excepthook = threading_exception_handler
 
     logger.info(f"Sistema di logging inizializzato in: {log_path}")
-    logger.info(f"Versione applicazione: 0.6.5")
+    try:
+        from config import VERSION
+        logger.info(f"Versione applicazione: {VERSION}")
+    except Exception:
+        logger.info("Versione applicazione: sconosciuta")
 
 
 def global_exception_handler(exc_type: type, exc_value: BaseException, exc_tb: Any) -> None:

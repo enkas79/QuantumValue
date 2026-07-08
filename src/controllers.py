@@ -5,7 +5,7 @@ Gestisce tutti i task asincroni interfacciando le funzioni pure
 del Model con la View (GUI), eliminando ogni classe fittizia intermedia.
 
 Autore: Enrico Martini
-Versione: 0.7.0
+Versione: 0.7.6
 """
 
 import asyncio

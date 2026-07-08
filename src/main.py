@@ -6,7 +6,7 @@ Questo è il file che dovrai puntare con PyInstaller per creare l'eseguibile:
 comando: pyinstaller --onefile --windowed main.py
 
 Autore: Enrico Martini
-Versione: 0.7.1
+Versione: 0.7.6
 """
 # comando Windows: pyinstaller --onefile --windowed --add-data "version.txt;." main.py
 # comando macOS/Linux: pyinstaller --onefile --windowed --add-data "version.txt:." main.py
@@ -39,8 +39,10 @@ except ImportError as e:
     sys.exit(1)
 
 # Importa i moduli dalla directory corrente (src/)
-from . import utils
-from . import views
+# Nota: usare import assoluti permette di eseguire questo file sia come script
+# (python src/main.py / PyInstaller da src) sia tramite il wrapper root main.py.
+import utils
+import views
 
 
 def main() -> None:

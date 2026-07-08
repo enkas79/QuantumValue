@@ -2,7 +2,7 @@
 Test per il modulo models.
 
 Autore: Enrico Martini
-Versione: 0.6.5
+Versione: 0.7.6
 """
 
 import pytest
