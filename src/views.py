@@ -112,7 +112,7 @@ class FmpSetupDialog(QDialog):
         )
         layout.addWidget(lbl_desc)
         btn_link = QPushButton("Ottieni API Key FMP Gratuita")
-        btn_link.setStyleSheet("color: #2980b9; text-align: left; border: none; text-decoration: underline;")
+        btn_link.setStyleSheet("color: #2980b9; background: transparent; text-align: left; border: none; text-decoration: underline;")
         btn_link.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_link.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://site.financialmodelingprep.com/developer/docs/")))
         layout.addWidget(btn_link)
@@ -243,21 +243,16 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self) -> None:
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
-        base_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.abspath(".")
+        # Come config._get_base_path(): la cartella di questo file (src), non
+        # la working directory, altrimenti dal wrapper root l'icona non si trova.
+        base_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(base_path, "icon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
         self._center_and_lock_window()
-        self.setStyleSheet("""
-            QMainWindow { background-color: #f0f2f5; }
-            QGroupBox { font-weight: bold; border: 1px solid #c8d6e5; border-radius: 6px; margin-top: 10px; background-color: white; }
-            QLineEdit { border: 1px solid #c8d6e5; border-radius: 4px; padding: 5px; }
-            QPushButton { font-weight: bold; border-radius: 4px; }
-            QTabWidget::pane { border: 1px solid #c8d6e5; background: white; border-radius: 6px; }
-            QTabBar::tab { background: #e0e6ed; padding: 10px; font-weight: bold; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px;}
-            QTabBar::tab:selected { background: white; color: #2980b9; border-bottom: 2px solid white; }
-        """)
+        # Palette e stylesheet chiari sono applicati a livello di QApplication
+        # in main._apply_light_theme(), così valgono anche per i dialoghi.
 
         self._create_menu_bar()
         central_widget = QWidget()

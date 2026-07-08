@@ -1,5 +1,5 @@
 # Dipendenze per QuantumValue Analysis
-# Versione: 0.7.6
+# Versione: 0.7.7
 
 # Interfaccia Grafica
 PyQt6==6.4.0

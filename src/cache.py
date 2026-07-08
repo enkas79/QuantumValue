@@ -5,7 +5,7 @@ Gestisce il caching locale dei dati finanziari per ridurre le chiamate HTTP
 ai provider esterni (Yahoo Finance, FMP).
 
 Autore: Enrico Martini
-Versione: 0.7.6
+Versione: 0.7.7
 """
 
 import os

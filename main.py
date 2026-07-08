@@ -5,7 +5,7 @@ Questo file è un wrapper che esegue il vero entry point in src/main.py
 per mantenere la compatibilità con le vecchie installazioni.
 
 Autore: Enrico Martini
-Versione: 0.7.6
+Versione: 0.7.7
 """
 
 import sys
