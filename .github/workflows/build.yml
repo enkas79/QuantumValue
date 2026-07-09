@@ -107,9 +107,15 @@ jobs:
           echo "Nessuna icona trovata: eseguo la build standard senza icona."
         fi
         pyinstaller --onedir --noconsole --name=QuantumValue_Analysis $ICON_ARGS \
+          --paths=. \
           --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance \
           --hidden-import=httpx --hidden-import=tenacity --hidden-import=cryptography \
-          --collect-all=yfinance --collect-all=PyQt6 --add-data "version.txt;." main.py
+          --hidden-import=keyring \
+          --hidden-import=config --hidden-import=theme --hidden-import=utils \
+          --hidden-import=views --hidden-import=models --hidden-import=controllers \
+          --hidden-import=cache \
+          --collect-all=yfinance --collect-all=PyQt6 --collect-submodules=keyring \
+          --add-data "version.txt;." main.py
 
     - name: Copia i file necessari nella directory dist
       run: |
@@ -228,9 +234,15 @@ jobs:
           echo "Nessuna icona trovata: eseguo la build standard senza icona."
         fi
         pyinstaller --onedir --noconsole --name=QuantumValue_Analysis $ICON_ARGS \
+          --paths=. \
           --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance \
           --hidden-import=httpx --hidden-import=tenacity --hidden-import=cryptography \
-          --collect-all=yfinance --collect-all=PyQt6 --add-data "version.txt:." main.py
+          --hidden-import=keyring \
+          --hidden-import=config --hidden-import=theme --hidden-import=utils \
+          --hidden-import=views --hidden-import=models --hidden-import=controllers \
+          --hidden-import=cache \
+          --collect-all=yfinance --collect-all=PyQt6 --collect-submodules=keyring \
+          --add-data "version.txt:." main.py
 
     - name: Impacchettamento nel formato Debian (.deb)
       shell: bash
@@ -336,9 +348,15 @@ jobs:
         # Nota: --windowed su macOS produce un bundle .app; l'icona .ico
         # non e' supportata nativamente (servirebbe .icns), quindi si omette.
         pyinstaller --onedir --windowed --name=QuantumValue_Analysis \
+          --paths=. \
           --hidden-import=pandas --hidden-import=requests --hidden-import=yfinance \
           --hidden-import=httpx --hidden-import=tenacity --hidden-import=cryptography \
-          --collect-all=yfinance --collect-all=PyQt6 --add-data "version.txt:." main.py
+          --hidden-import=keyring \
+          --hidden-import=config --hidden-import=theme --hidden-import=utils \
+          --hidden-import=views --hidden-import=models --hidden-import=controllers \
+          --hidden-import=cache \
+          --collect-all=yfinance --collect-all=PyQt6 --collect-submodules=keyring \
+          --add-data "version.txt:." main.py
 
     - name: Comprimi il bundle .app in .zip
       shell: bash
