@@ -2,7 +2,7 @@
 Test per i worker QThread del Controller (con pytest-qt e provider mockati).
 
 Autore: Enrico Martini
-Versione: 0.7.9
+Versione: 0.7.10
 """
 
 import os
