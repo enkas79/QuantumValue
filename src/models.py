@@ -5,7 +5,7 @@ Contiene le regole matematiche di calcolo finanziario, gli algoritmi di screenin
 el caching dei dati e l'estrazione dati dai provider (Yahoo Finance, FMP).
 
 Autore: Enrico Martini
-Versione: 0.7.11
+Versione: 0.7.12
 """
 
 import sys
@@ -410,24 +410,26 @@ def evaluate_etf(
 
 
 @_retry_request
-def search_by_name(query: str) -> List[Tuple[str, str, str]]:
+def search_by_name(query: str, quote_types: Tuple[str, ...] = ('EQUITY', 'ETF')) -> List[Tuple[str, str, str]]:
     """
     Ricerca i ticker azionari ed ETF tramite endpoint pubblico di Yahoo Finance.
-    
+
     Args:
         query (str): Testo da cercare (ticker, nome azienda, ISIN).
-    
+        quote_types (Tuple[str, ...]): Tipi di strumento da includere nei risultati
+            (es. solo 'ETF' per restringere la ricerca ai soli fondi).
+
     Returns:
         List[Tuple[str, str, str]]: Lista di (simbolo, nome, borsa).
     """
     # Gestisce spazi e formattazione
     query = query.strip().replace(" ", "+")
     url: str = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=10"
-    
+
     try:
         response = requests.get(
-            url, 
-            headers=config.HTTP_HEADERS, 
+            url,
+            headers=config.HTTP_HEADERS,
             timeout=config.HTTP_TIMEOUT
         )
         response.raise_for_status()
@@ -435,7 +437,7 @@ def search_by_name(query: str) -> List[Tuple[str, str, str]]:
         results: List[Tuple[str, str, str]] = []
 
         for quote in data.get('quotes', []):
-            if quote.get('quoteType') in ['EQUITY', 'ETF']:
+            if quote.get('quoteType') in quote_types:
                 symbol: str = quote.get('symbol', '').replace(" ", "")  # Rimuove spazi
                 name: str = quote.get('shortname', quote.get('longname', 'Sconosciuto'))
                 raw_exchange: str = quote.get('exchange', 'N/A')

@@ -21,7 +21,7 @@ connessione tardiva perderebbe l'evento e il test si bloccherebbe fino al
 timeout. waitUntil, basato su polling dello stato, non ha questa race.
 
 Autore: Enrico Martini
-Versione: 0.7.11
+Versione: 0.7.12
 """
 
 import os
@@ -72,7 +72,7 @@ def main_window(qtbot, monkeypatch):
 def test_search_worker_ref_cleared_after_success(qtbot, main_window, monkeypatch):
     # Nessun match esatto: apre (il TickerSearchDialog mockato) senza bloccare
     monkeypatch.setattr(models, "search_by_name",
-                        lambda q: [("NOMATCH", "Nessuna Corrispondenza", "NASDAQ (USA)")])
+                        lambda q, quote_types=('EQUITY', 'ETF'): [("NOMATCH", "Nessuna Corrispondenza", "NASDAQ (USA)")])
 
     main_window.input_ticker.setText("QUERY")
     main_window._on_search_requested()
@@ -89,7 +89,7 @@ def test_search_worker_ref_cleared_after_success(qtbot, main_window, monkeypatch
 
 
 def test_search_worker_ref_cleared_after_error(qtbot, main_window, monkeypatch):
-    def boom(query):
+    def boom(query, quote_types=('EQUITY', 'ETF')):
         raise RuntimeError("rete non disponibile")
 
     monkeypatch.setattr(models, "search_by_name", boom)
@@ -106,7 +106,7 @@ def test_search_worker_ref_cleared_after_error(qtbot, main_window, monkeypatch):
 def test_second_search_after_completion_does_not_crash(qtbot, main_window, monkeypatch):
     """Scenario esatto del bug: due ricerche in sequenza, la seconda dopo il completamento della prima."""
     monkeypatch.setattr(models, "search_by_name",
-                        lambda q: [("NOMATCH", "Nessuna Corrispondenza", "NASDAQ (USA)")])
+                        lambda q, quote_types=('EQUITY', 'ETF'): [("NOMATCH", "Nessuna Corrispondenza", "NASDAQ (USA)")])
 
     main_window.input_ticker.setText("PRIMA")
     main_window._on_search_requested()
@@ -132,6 +132,34 @@ def test_etf_worker_ref_cleared_after_success(qtbot, main_window, monkeypatch):
 
     qtbot.waitUntil(lambda: main_window.etf_worker is None, timeout=5000)
     assert not (main_window.etf_worker and main_window.etf_worker.isRunning())
+
+
+def test_etf_name_search_fallback_on_direct_fetch_failure(qtbot, main_window, monkeypatch):
+    """Se il Ticker/ISIN diretto non trova l'ETF, deve scattare automaticamente
+    la ricerca per nome (stesso comportamento gia' presente per le Azioni)."""
+    def boom(query):
+        raise ValueError(f"ETF '{query}' non trovato.")
+    monkeypatch.setattr(models, "fetch_etf_data", boom)
+
+    search_calls = []
+
+    def fake_search(query, quote_types=('EQUITY', 'ETF')):
+        search_calls.append((query, quote_types))
+        return [("SWDA.MI", "iShares Core MSCI World", "Borsa Italiana (Milano)")]
+
+    monkeypatch.setattr(models, "search_by_name", fake_search)
+
+    main_window.rb_etf.setChecked(True)
+    main_window.input_ticker.setText("iShares Core MSCI World")
+    main_window._on_search_requested()
+    assert main_window.etf_worker is not None
+
+    # Il fallimento del fetch diretto innesca il SearchWorker per nome (solo ETF)
+    qtbot.waitUntil(lambda: main_window.etf_worker is None, timeout=5000)
+    qtbot.waitUntil(lambda: main_window.search_worker is None, timeout=5000)
+
+    # Il campo di input forza il maiuscolo (comportamento gia' esistente)
+    assert search_calls == [("ISHARES CORE MSCI WORLD", ('ETF',))]
 
 
 def test_fetch_worker_ref_cleared_after_success(qtbot, main_window):

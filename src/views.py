@@ -634,7 +634,7 @@ class MainWindow(QMainWindow):
         search_layout.addSpacing(15)
 
         self.input_ticker = QLineEdit()
-        self.input_ticker.setPlaceholderText("Es. AAPL (Azione) oppure IE00B4L5Y983 (ETF)...")
+        self.input_ticker.setPlaceholderText("Es. AAPL, Apple (Azione) oppure IE00B4L5Y983, Vanguard FTSE (ETF)...")
         self.input_ticker.setMaximumWidth(320)
         self.input_ticker.textChanged.connect(self._force_uppercase_ticker)
         self.input_ticker.returnPressed.connect(self._on_search_requested)
@@ -925,7 +925,7 @@ class MainWindow(QMainWindow):
             for lbl in (self.lbl_var_1d, self.lbl_var_1w, self.lbl_var_1m, self.lbl_var_1y):
                 lbl.setText("--")
 
-            self.search_worker = SearchWorker(query)
+            self.search_worker = SearchWorker(query, quote_types=('EQUITY',))
             search_worker = self.search_worker
             search_worker.finished.connect(self._on_search_success)
             search_worker.finished.connect(search_worker.deleteLater)
@@ -936,15 +936,7 @@ class MainWindow(QMainWindow):
             search_worker.start()
         else:
             self.lbl_etf_name.setText("Fondo/ETF: --")
-            self.etf_worker = EtfFetchWorker(query)
-            etf_worker = self.etf_worker
-            etf_worker.finished.connect(self._on_etf_fetch_success)
-            etf_worker.finished.connect(etf_worker.deleteLater)
-            etf_worker.finished.connect(lambda *_a: self._clear_worker_ref('etf_worker', etf_worker))
-            etf_worker.error.connect(self._on_etf_fetch_error)
-            etf_worker.error.connect(etf_worker.deleteLater)
-            etf_worker.error.connect(lambda *_a: self._clear_worker_ref('etf_worker', etf_worker))
-            etf_worker.start()
+            self._start_etf_fetch(query, allow_name_fallback=True)
 
     def _on_search_success(self, results: List[Tuple[str, str, str]], query: str) -> None:
         import logging
@@ -1185,6 +1177,65 @@ class MainWindow(QMainWindow):
             self.btn_fetch.setEnabled(True)
             QMessageBox.critical(self, "Errore Aggiornamento ETF",
                                  f"I dati dell'ETF hanno causato un conflitto grafico:\n{str(e)}")
+
+    def _start_etf_fetch(self, query: str, allow_name_fallback: bool = False) -> None:
+        """Avvia il download dati ETF. Se il ticker/ISIN diretto fallisce e
+        allow_name_fallback e' attivo, ripiega automaticamente sulla ricerca
+        per nome (stesso meccanismo gia' usato per le Azioni)."""
+        if self.etf_worker and self.etf_worker.isRunning():
+            return
+        self.btn_fetch.setEnabled(False)
+        self.statusBar().showMessage(f"Ricerca dati per '{query}' in corso...")
+
+        self.etf_worker = EtfFetchWorker(query)
+        etf_worker = self.etf_worker
+        etf_worker.finished.connect(self._on_etf_fetch_success)
+        etf_worker.finished.connect(etf_worker.deleteLater)
+        etf_worker.finished.connect(lambda *_a: self._clear_worker_ref('etf_worker', etf_worker))
+        if allow_name_fallback:
+            etf_worker.error.connect(lambda msg: self._on_etf_fetch_error_with_fallback(msg, query))
+        else:
+            etf_worker.error.connect(self._on_etf_fetch_error)
+        etf_worker.error.connect(etf_worker.deleteLater)
+        etf_worker.error.connect(lambda *_a: self._clear_worker_ref('etf_worker', etf_worker))
+        etf_worker.start()
+
+    def _on_etf_fetch_error_with_fallback(self, error_msg: str, original_query: str) -> None:
+        """Il fetch diretto per Ticker/ISIN e' fallito: prova la ricerca per
+        nome (es. "Vanguard FTSE All-World") prima di mostrare l'errore."""
+        if self.search_worker and self.search_worker.isRunning():
+            self.btn_fetch.setEnabled(True)
+            QMessageBox.critical(self, "Errore ETF", error_msg)
+            return
+
+        self.statusBar().showMessage(f"'{original_query}' non trovato come Ticker/ISIN, ricerca per nome...")
+        self.search_worker = SearchWorker(original_query, quote_types=('ETF',))
+        search_worker = self.search_worker
+        search_worker.finished.connect(lambda results, _q: self._on_etf_name_search_success(results, error_msg))
+        search_worker.finished.connect(search_worker.deleteLater)
+        search_worker.finished.connect(lambda *_a: self._clear_worker_ref('search_worker', search_worker))
+        search_worker.error.connect(lambda _e: self._on_etf_name_search_failed(error_msg))
+        search_worker.error.connect(search_worker.deleteLater)
+        search_worker.error.connect(lambda *_a: self._clear_worker_ref('search_worker', search_worker))
+        search_worker.start()
+
+    def _on_etf_name_search_success(self, results: List[Tuple[str, str, str]], original_error: str) -> None:
+        self.btn_fetch.setEnabled(True)
+        if not results:
+            QMessageBox.critical(self, "Errore ETF", original_error)
+            return
+
+        dialog = TickerSearchDialog(results, self)
+        result_code = dialog.exec()
+        if (result_code == 1 or result_code == QDialog.DialogCode.Accepted) and dialog.selected_ticker:
+            self.input_ticker.setText(dialog.selected_ticker)
+            self._start_etf_fetch(dialog.selected_ticker)
+        else:
+            self.statusBar().showMessage("Ricerca ETF annullata.")
+
+    def _on_etf_name_search_failed(self, original_error: str) -> None:
+        self.btn_fetch.setEnabled(True)
+        QMessageBox.critical(self, "Errore ETF", original_error)
 
     def _on_etf_fetch_error(self, error_msg: str) -> None:
         self.btn_fetch.setEnabled(True)

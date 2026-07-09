@@ -5,7 +5,7 @@ Gestisce tutti i task asincroni interfacciando le funzioni pure
 del Model con la View (GUI), eliminando ogni classe fittizia intermedia.
 
 Autore: Enrico Martini
-Versione: 0.7.11
+Versione: 0.7.12
 """
 
 import asyncio
@@ -42,18 +42,24 @@ class UpdateCheckWorker(QThread):
 
 
 class SearchWorker(QThread):
-    """Worker in background per la ricerca testuale dei Ticker."""
+    """Worker in background per la ricerca testuale dei Ticker (per nome, ISIN o simbolo)."""
     finished = pyqtSignal(object, str)
     error = pyqtSignal(str)
 
-    def __init__(self, query: str, parent: Optional[QObject] = None) -> None:
+    def __init__(
+        self,
+        query: str,
+        quote_types: Tuple[str, ...] = ('EQUITY', 'ETF'),
+        parent: Optional[QObject] = None
+    ) -> None:
         super().__init__(parent)
         self.query: str = query
+        self.quote_types: Tuple[str, ...] = quote_types
 
     def run(self) -> None:
         """Esegue la ricerca testuale di aziende ed ETF via funzioni di modulo."""
         try:
-            results: List[Tuple[str, str, str]] = models.search_by_name(self.query)
+            results: List[Tuple[str, str, str]] = models.search_by_name(self.query, self.quote_types)
             self.finished.emit(results, self.query)
         except Exception as e:
             self.error.emit(str(e))

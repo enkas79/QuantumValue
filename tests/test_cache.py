@@ -2,7 +2,7 @@
 Test per il modulo cache (SQLite locale).
 
 Autore: Enrico Martini
-Versione: 0.7.11
+Versione: 0.7.12
 """
 
 import os

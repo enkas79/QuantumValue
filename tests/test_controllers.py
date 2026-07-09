@@ -2,7 +2,7 @@
 Test per i worker QThread del Controller (con pytest-qt e provider mockati).
 
 Autore: Enrico Martini
-Versione: 0.7.11
+Versione: 0.7.12
 """
 
 import os
@@ -23,7 +23,7 @@ import controllers
 
 def test_search_worker_success(qtbot, monkeypatch):
     results = [("AAPL", "Apple Inc.", "NASDAQ (USA)")]
-    monkeypatch.setattr(models, "search_by_name", lambda q: results)
+    monkeypatch.setattr(models, "search_by_name", lambda q, quote_types=('EQUITY', 'ETF'): results)
 
     worker = controllers.SearchWorker("apple")
     with qtbot.waitSignal(worker.finished, timeout=5000) as blocker:
@@ -33,7 +33,7 @@ def test_search_worker_success(qtbot, monkeypatch):
 
 
 def test_search_worker_error(qtbot, monkeypatch):
-    def boom(query):
+    def boom(query, quote_types=('EQUITY', 'ETF')):
         raise RuntimeError("rete non disponibile")
 
     monkeypatch.setattr(models, "search_by_name", boom)

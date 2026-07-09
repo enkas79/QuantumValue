@@ -2,7 +2,7 @@
 Test per dataclass, validazione input e selezione asset di release.
 
 Autore: Enrico Martini
-Versione: 0.7.11
+Versione: 0.7.12
 """
 
 import os
