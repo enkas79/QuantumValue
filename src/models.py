@@ -5,7 +5,7 @@ Contiene le regole matematiche di calcolo finanziario, gli algoritmi di screenin
 el caching dei dati e l'estrazione dati dai provider (Yahoo Finance, FMP).
 
 Autore: Enrico Martini
-Versione: 0.7.13
+Versione: 0.7.14
 """
 
 import sys
@@ -845,6 +845,121 @@ class TwelveDataProvider(DataProvider):
             raise ValueError(f"Errore di rete Twelve Data: {str(e)}")
 
 
+class EodhdProvider(DataProvider):
+    """Provider di riserva aggiuntivo: EOD Historical Data (richiede API key gratuita)."""
+
+    name = "EODHD"
+
+    def __init__(self, api_key: str = "") -> None:
+        self.api_key: str = api_key
+
+    @staticmethod
+    def _to_eodhd_symbol(ticker_symbol: str) -> str:
+        """EODHD richiede sempre un suffisso di borsa (es. 'AAPL.US'). I ticker
+        senza suffisso (convenzione Yahoo per i listini USA) vengono assunti
+        US; i ticker gia' con suffisso (es. 'ENI.MI') vengono passati cosi'
+        come sono."""
+        return ticker_symbol if '.' in ticker_symbol else f"{ticker_symbol}.US"
+
+    @_retry_request
+    def fetch(self, ticker_symbol: str) -> StockData:
+        """
+        Recupera i dati da EOD Historical Data (EODHD).
+
+        Args:
+            ticker_symbol (str): Simbolo del ticker.
+
+        Returns:
+            StockData: Dati finanziari.
+        """
+        if not self.api_key:
+            raise ValueError("Nessuna API Key EODHD configurata.")
+
+        eodhd_symbol: str = self._to_eodhd_symbol(ticker_symbol)
+        base_url: str = "https://eodhd.com/api"
+
+        try:
+            with requests.Session() as session:
+                fund_resp = session.get(
+                    f"{base_url}/fundamentals/{eodhd_symbol}",
+                    params={"api_token": self.api_key, "fmt": "json"},
+                    timeout=config.HTTP_TIMEOUT
+                ).json()
+
+                quote_resp = session.get(
+                    f"{base_url}/real-time/{eodhd_symbol}",
+                    params={"api_token": self.api_key, "fmt": "json"},
+                    timeout=config.HTTP_TIMEOUT
+                ).json()
+
+            if not isinstance(fund_resp, dict) or not fund_resp.get('General'):
+                raise ValueError(f"Ticker '{eodhd_symbol}' non trovato su EODHD.")
+
+            general: dict = fund_resp.get('General', {}) or {}
+            highlights: dict = fund_resp.get('Highlights', {}) or {}
+            valuation: dict = fund_resp.get('Valuation', {}) or {}
+            financials: dict = fund_resp.get('Financials', {}) or {}
+
+            income_yearly: dict = ((financials.get('Income_Statement', {}) or {}).get('yearly', {})) or {}
+            balance_yearly: dict = ((financials.get('Balance_Sheet', {}) or {}).get('yearly', {})) or {}
+
+            def _latest_period(yearly: dict) -> dict:
+                """L'API restituisce i periodi annuali come mappa data->voci,
+                non necessariamente ordinata: si prende la data piu' recente."""
+                if not yearly:
+                    return {}
+                latest_date = max(yearly.keys())
+                return yearly.get(latest_date, {}) or {}
+
+            income: dict = _latest_period(income_yearly)
+            balance: dict = _latest_period(balance_yearly)
+
+            ev: float = float(valuation.get('EnterpriseValue', 0.0) or 0.0)
+            ebitda: float = float(highlights.get('EBITDA', 0.0) or income.get('ebitda', 0.0) or 0.0)
+            ebit: float = float(income.get('ebit', 0.0) or (ebitda * DEFAULT_EBIT_MARGIN_PROX))
+
+            pe: float = float(highlights.get('PERatio', 0.0) or 0.0)
+            ps: float = float(valuation.get('PriceSalesTTM', 0.0) or 0.0)
+            peg: float = float(highlights.get('PEGRatio', 0.0) or 0.0)
+
+            tax_rate: float = 0.21
+            income_before_tax: float = float(income.get('incomeBeforeTax', 0.0) or 0.0)
+            income_tax_expense: float = float(income.get('incomeTaxExpense', 0.0) or 0.0)
+            if income_before_tax > 0:
+                tax_rate = min(max(income_tax_expense / income_before_tax, 0.15), 0.35)
+
+            nopat: float = ebit * (1 - tax_rate)
+
+            total_debt: float = float(balance.get('shortLongTermDebtTotal', 0.0) or 0.0)
+            equity: float = float(balance.get('totalStockholderEquity', 0.0) or 0.0)
+            invested_capital: float = (total_debt + equity) if equity > 0 else (ev * 0.8 if ev > 0 else 0.0)
+
+            curr_price: float = float((quote_resp or {}).get('close', 0.0) or 0.0) if isinstance(quote_resp, dict) else 0.0
+            prices = {
+                'current': curr_price,
+                '1d': curr_price,
+                '1w': curr_price,
+                '1m': curr_price,
+                '1y': curr_price
+            }
+
+            return StockData(
+                company_name=general.get('Name', ticker_symbol),
+                currency=general.get('CurrencyCode', 'USD'),
+                prices=prices,
+                ebit=ebit,
+                ev=ev,
+                nopat=nopat,
+                invested_capital=invested_capital,
+                ebitda=ebitda,
+                pe=pe,
+                ps=ps,
+                peg=peg
+            )
+        except requests.exceptions.RequestException as e:
+            raise ValueError(f"Errore di rete EODHD: {str(e)}")
+
+
 class FinancialDataFetcher:
     """
     Orchestratore dei provider di dati azionari (pattern Strategy).
@@ -855,14 +970,16 @@ class FinancialDataFetcher:
       HEDGE_DELAY_SECONDS, il primo provider di riserva configurato parte in
       parallelo e vince il primo risultato utile, riducendo l'attesa nel caso
       peggiore senza sprecare quota quando Yahoo risponde subito.
-    - Provider di riserva aggiuntivi (es. Twelve Data) tentati in sequenza
-      solo se sia il primario sia il primo di riserva falliscono entrambi.
+    - Provider di riserva aggiuntivi (es. Twelve Data, EODHD) tentati in
+      sequenza solo se sia il primario sia il primo di riserva falliscono
+      entrambi.
     - Fallback finale a dati statici per i ticker piu' comuni
     """
 
-    def __init__(self, fmp_api_key: str = "", twelvedata_api_key: str = "") -> None:
+    def __init__(self, fmp_api_key: str = "", twelvedata_api_key: str = "", eodhd_api_key: str = "") -> None:
         self.fmp_api_key: str = fmp_api_key
         self.twelvedata_api_key: str = twelvedata_api_key
+        self.eodhd_api_key: str = eodhd_api_key
 
     def _providers(self) -> List[DataProvider]:
         """Catena ordinata dei provider disponibili (il primo e' il preferito)."""
@@ -871,6 +988,8 @@ class FinancialDataFetcher:
             providers.append(FmpProvider(self.fmp_api_key))
         if self.twelvedata_api_key:
             providers.append(TwelveDataProvider(self.twelvedata_api_key))
+        if self.eodhd_api_key:
+            providers.append(EodhdProvider(self.eodhd_api_key))
         return providers
 
     def fetch_data(self, ticker_symbol: str) -> StockData:

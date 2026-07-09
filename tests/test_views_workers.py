@@ -21,7 +21,7 @@ connessione tardiva perderebbe l'evento e il test si bloccherebbe fino al
 timeout. waitUntil, basato su polling dello stato, non ha questa race.
 
 Autore: Enrico Martini
-Versione: 0.7.13
+Versione: 0.7.14
 """
 
 import os

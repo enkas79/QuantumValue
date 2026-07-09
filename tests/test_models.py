@@ -2,7 +2,7 @@
 Test per il modulo models.
 
 Autore: Enrico Martini
-Versione: 0.7.13
+Versione: 0.7.14
 """
 
 import pytest
@@ -253,6 +253,86 @@ class TestTwelveDataProvider:
             provider.fetch("ZZZZZZ")
 
 
+class TestEodhdProvider:
+    """Test per il provider di riserva EODHD."""
+
+    def test_symbol_suffix_defaults_to_us(self):
+        import models
+        assert models.EodhdProvider._to_eodhd_symbol("AAPL") == "AAPL.US"
+        assert models.EodhdProvider._to_eodhd_symbol("ENI.MI") == "ENI.MI"
+
+    def test_fetch_maps_fields_correctly(self, monkeypatch):
+        import models
+
+        fund_payload = {
+            "General": {"Name": "Example Corp", "CurrencyCode": "USD"},
+            "Highlights": {"EBITDA": 20.0, "PERatio": 15.0, "PEGRatio": 1.2},
+            "Valuation": {"EnterpriseValue": 100.0, "PriceSalesTTM": 3.0},
+            "Financials": {
+                "Income_Statement": {
+                    "yearly": {
+                        "2022-12-31": {"ebit": 12.0},
+                        "2023-12-31": {
+                            "ebit": 15.0,
+                            "incomeBeforeTax": 25.0,
+                            "incomeTaxExpense": 5.0
+                        }
+                    }
+                },
+                "Balance_Sheet": {
+                    "yearly": {
+                        "2023-12-31": {
+                            "shortLongTermDebtTotal": 10.0,
+                            "totalStockholderEquity": 30.0
+                        }
+                    }
+                }
+            }
+        }
+        quote_payload = {"close": "42.5"}
+        responses = [_FakeHttpResponse(fund_payload), _FakeHttpResponse(quote_payload)]
+
+        def fake_get(self, url, params=None, timeout=None):
+            return responses.pop(0)
+
+        monkeypatch.setattr(models.requests.Session, "get", fake_get)
+
+        provider = models.EodhdProvider(api_key="eodhd-key")
+        data = provider.fetch("EXMPL")
+
+        assert data.company_name == "Example Corp"
+        assert data.currency == "USD"
+        assert data.ev == 100.0
+        assert data.ebitda == 20.0
+        assert data.ebit == 15.0  # dal periodo annuale piu' recente (2023, non 2022)
+        assert data.pe == 15.0
+        assert data.ps == 3.0
+        assert data.peg == 1.2
+        assert data.invested_capital == 10.0 + 30.0
+        assert data.prices["current"] == 42.5
+
+    def test_fetch_without_api_key_raises(self, monkeypatch):
+        import models
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
+        provider = models.EodhdProvider(api_key="")
+        with pytest.raises(Exception):
+            provider.fetch("AAPL")
+
+    def test_fetch_symbol_not_found_raises(self, monkeypatch):
+        import models
+
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+        def fake_get(self, url, params=None, timeout=None):
+            return _FakeHttpResponse({})
+
+        monkeypatch.setattr(models.requests.Session, "get", fake_get)
+
+        provider = models.EodhdProvider(api_key="eodhd-key")
+        with pytest.raises(Exception):
+            provider.fetch("ZZZZZZ")
+
+
 class TestFinancialDataFetcherChain:
     """Test per la catena di provider e i fallback di FinancialDataFetcher."""
 
@@ -263,8 +343,10 @@ class TestFinancialDataFetcherChain:
 
     def test_providers_chain_includes_all_configured(self):
         import models
-        fetcher = models.FinancialDataFetcher(fmp_api_key="fmp-key", twelvedata_api_key="td-key")
-        assert [p.name for p in fetcher._providers()] == ["Yahoo Finance", "FMP", "Twelve Data"]
+        fetcher = models.FinancialDataFetcher(
+            fmp_api_key="fmp-key", twelvedata_api_key="td-key", eodhd_api_key="eodhd-key"
+        )
+        assert [p.name for p in fetcher._providers()] == ["Yahoo Finance", "FMP", "Twelve Data", "EODHD"]
 
     def test_fetch_data_falls_back_to_extra_backup_provider(self, monkeypatch):
         import models
@@ -285,6 +367,28 @@ class TestFinancialDataFetcherChain:
         result = fetcher.fetch_data("ZZZZ")
         assert result == expected
 
+    def test_fetch_data_falls_back_through_all_extra_backups(self, monkeypatch):
+        import models
+
+        monkeypatch.setattr(models, "get_cached", lambda key: None)
+        monkeypatch.setattr(models, "set_cached", lambda key, value: True)
+
+        def boom(self, ticker):
+            raise ValueError("provider fallito")
+
+        expected = models.StockData(company_name="EODHD Corp", ev=7.0)
+
+        monkeypatch.setattr(models.YahooProvider, "fetch", boom)
+        monkeypatch.setattr(models.FmpProvider, "fetch", boom)
+        monkeypatch.setattr(models.TwelveDataProvider, "fetch", boom)
+        monkeypatch.setattr(models.EodhdProvider, "fetch", lambda self, ticker: expected)
+
+        fetcher = models.FinancialDataFetcher(
+            fmp_api_key="fmp-key", twelvedata_api_key="td-key", eodhd_api_key="eodhd-key"
+        )
+        result = fetcher.fetch_data("YYYY")
+        assert result == expected
+
     def test_fetch_data_all_providers_fail_raises(self, monkeypatch):
         import models
 
@@ -296,7 +400,10 @@ class TestFinancialDataFetcherChain:
         monkeypatch.setattr(models.YahooProvider, "fetch", boom)
         monkeypatch.setattr(models.FmpProvider, "fetch", boom)
         monkeypatch.setattr(models.TwelveDataProvider, "fetch", boom)
+        monkeypatch.setattr(models.EodhdProvider, "fetch", boom)
 
-        fetcher = models.FinancialDataFetcher(fmp_api_key="fmp-key", twelvedata_api_key="td-key")
+        fetcher = models.FinancialDataFetcher(
+            fmp_api_key="fmp-key", twelvedata_api_key="td-key", eodhd_api_key="eodhd-key"
+        )
         with pytest.raises(ValueError):
             fetcher.fetch_data("NONEXISTENTTICKERXYZ")

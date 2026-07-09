@@ -175,9 +175,9 @@ class GuideDialog(QDialog):
 
 
 class FmpSetupDialog(QDialog):
-    """Setup opzionale dei provider di riserva a Yahoo Finance (FMP e Twelve Data).
+    """Setup opzionale dei provider di riserva a Yahoo Finance (FMP, Twelve Data, EODHD).
 
-    Entrambe le API key sono facoltative e seguono lo stesso criterio di
+    Tutte le API key sono facoltative e seguono lo stesso criterio di
     iscrizione: piano gratuito, inserimento opzionale al primo avvio,
     saltabile senza perdere funzionalita' (Yahoo resta comunque il provider
     primario)."""
@@ -185,9 +185,10 @@ class FmpSetupDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Configurazione Database Dati (Opzionale)")
-        self.setMinimumSize(480, 300)
+        self.setMinimumSize(480, 380)
         self.api_key: str = ""
         self.twelvedata_api_key: str = ""
+        self.eodhd_api_key: str = ""
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -223,6 +224,17 @@ class FmpSetupDialog(QDialog):
         self.txt_api_td.setPlaceholderText("Incolla qui la tua API Key Twelve Data...")
         layout.addWidget(self.txt_api_td)
 
+        lbl_eodhd = QLabel("<b>EOD Historical Data (EODHD)</b>")
+        layout.addWidget(lbl_eodhd)
+        btn_link_eodhd = QPushButton("Ottieni API Key EODHD Gratuita")
+        btn_link_eodhd.setStyleSheet("color: #2980b9; background: transparent; text-align: left; border: none; text-decoration: underline;")
+        btn_link_eodhd.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_link_eodhd.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://eodhd.com?via=enkas79")))
+        layout.addWidget(btn_link_eodhd)
+        self.txt_api_eodhd = QLineEdit()
+        self.txt_api_eodhd.setPlaceholderText("Incolla qui la tua API Key EODHD...")
+        layout.addWidget(self.txt_api_eodhd)
+
         btn_box = QDialogButtonBox()
         btn_save = btn_box.addButton("Salva API Key", QDialogButtonBox.ButtonRole.AcceptRole)
         btn_skip = btn_box.addButton("Salta (Usa solo Yahoo)", QDialogButtonBox.ButtonRole.RejectRole)
@@ -234,6 +246,7 @@ class FmpSetupDialog(QDialog):
     def _on_save(self) -> None:
         self.api_key = self.txt_api.text().strip()
         self.twelvedata_api_key = self.txt_api_td.text().strip()
+        self.eodhd_api_key = self.txt_api_eodhd.text().strip()
         self.accept()
 
 
@@ -309,6 +322,7 @@ class MainWindow(QMainWindow):
         # migrazione automatica dalla vecchia copia offuscata in QSettings)
         self.fmp_api_key: str = utils.load_api_key(self.settings)
         self.twelvedata_api_key: str = utils.load_api_key(self.settings, "twelvedata_api_key")
+        self.eodhd_api_key: str = utils.load_api_key(self.settings, "eodhd_api_key")
 
         # Cronologia degli ultimi ticker analizzati con successo
         recent = self.settings.value("recent_tickers", [])
@@ -316,7 +330,7 @@ class MainWindow(QMainWindow):
             recent = [recent] if recent else []
         self.recent_tickers: List[str] = [str(t) for t in (recent or [])][:MAX_RECENT_TICKERS]
 
-        self.fetcher = models.FinancialDataFetcher(self.fmp_api_key, self.twelvedata_api_key)
+        self.fetcher = models.FinancialDataFetcher(self.fmp_api_key, self.twelvedata_api_key, self.eodhd_api_key)
 
         self.fetch_worker: Optional[FetchWorker] = None
         self.search_worker: Optional[SearchWorker] = None
@@ -333,9 +347,13 @@ class MainWindow(QMainWindow):
 
     def _check_first_run_setup(self) -> None:
         asked: bool = self.settings.value("fmp_asked_once", False, type=bool)
-        if not asked and not self.fmp_api_key and not self.twelvedata_api_key:
+        already_configured = self.fmp_api_key or self.twelvedata_api_key or self.eodhd_api_key
+        if not asked and not already_configured:
             dialog = FmpSetupDialog(self)
-            if dialog.exec() == QDialog.DialogCode.Accepted and (dialog.api_key or dialog.twelvedata_api_key):
+            any_key = dialog.exec() == QDialog.DialogCode.Accepted and (
+                dialog.api_key or dialog.twelvedata_api_key or dialog.eodhd_api_key
+            )
+            if any_key:
                 configured: List[str] = []
                 if dialog.api_key:
                     self.fmp_api_key = dialog.api_key
@@ -348,6 +366,11 @@ class MainWindow(QMainWindow):
                     utils.save_api_key(self.settings, self.twelvedata_api_key, "twelvedata_api_key")
                     self.fetcher.twelvedata_api_key = self.twelvedata_api_key
                     configured.append("Twelve Data")
+                if dialog.eodhd_api_key:
+                    self.eodhd_api_key = dialog.eodhd_api_key
+                    utils.save_api_key(self.settings, self.eodhd_api_key, "eodhd_api_key")
+                    self.fetcher.eodhd_api_key = self.eodhd_api_key
+                    configured.append("EODHD")
                 self.statusBar().showMessage(f"API Key {' e '.join(configured)} configurata. Resilienza dati attivata.")
             self.settings.setValue("fmp_asked_once", True)
 
@@ -435,7 +458,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(export_action)
         file_menu.addSeparator()
 
-        reset_api_action = QAction("&Reimposta API Dati Esterni (FMP/Twelve Data)", self)
+        reset_api_action = QAction("&Reimposta API Dati Esterni (FMP/Twelve Data/EODHD)", self)
         reset_api_action.triggered.connect(self._reset_api_key)
         file_menu.addAction(reset_api_action)
         file_menu.addSeparator()
@@ -471,11 +494,14 @@ class MainWindow(QMainWindow):
     def _reset_api_key(self) -> None:
         utils.delete_api_key(self.settings)
         utils.delete_api_key(self.settings, "twelvedata_api_key")
+        utils.delete_api_key(self.settings, "eodhd_api_key")
         self.settings.setValue("fmp_asked_once", False)
         self.fmp_api_key = ""
         self.twelvedata_api_key = ""
+        self.eodhd_api_key = ""
         self.fetcher.fmp_api_key = ""
         self.fetcher.twelvedata_api_key = ""
+        self.fetcher.eodhd_api_key = ""
         QMessageBox.information(self, "API Resettate",
                                 "Impostazioni ripristinate. Al riavvio verrà richiesta la chiave.")
 
