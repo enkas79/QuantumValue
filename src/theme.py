@@ -9,7 +9,7 @@ chiaro sopra gli sfondi chiari imposti dagli stylesheet (o viceversa),
 rendendo il testo illeggibile.
 
 Autore: Enrico Martini
-Versione: 0.7.12
+Versione: 0.7.13
 """
 
 from string import Template

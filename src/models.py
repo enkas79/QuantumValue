@@ -5,7 +5,7 @@ Contiene le regole matematiche di calcolo finanziario, gli algoritmi di screenin
 el caching dei dati e l'estrazione dati dai provider (Yahoo Finance, FMP).
 
 Autore: Enrico Martini
-Versione: 0.7.12
+Versione: 0.7.13
 """
 
 import sys
@@ -751,6 +751,100 @@ class FmpProvider(DataProvider):
             raise ValueError(f"Errore di rete FMP: {str(e)}")
 
 
+class TwelveDataProvider(DataProvider):
+    """Provider di riserva aggiuntivo: Twelve Data (richiede API key gratuita)."""
+
+    name = "Twelve Data"
+
+    def __init__(self, api_key: str = "") -> None:
+        self.api_key: str = api_key
+
+    @_retry_request
+    def fetch(self, ticker_symbol: str) -> StockData:
+        """
+        Recupera i dati da Twelve Data.
+
+        Args:
+            ticker_symbol (str): Simbolo del ticker.
+
+        Returns:
+            StockData: Dati finanziari.
+        """
+        if not self.api_key:
+            raise ValueError("Nessuna API Key Twelve Data configurata.")
+
+        base_url: str = "https://api.twelvedata.com"
+
+        try:
+            with requests.Session() as session:
+                # Riepilogo di valutazione e bilancio in un'unica chiamata
+                stats_resp = session.get(
+                    f"{base_url}/statistics",
+                    params={"symbol": ticker_symbol, "apikey": self.api_key},
+                    timeout=config.HTTP_TIMEOUT
+                ).json()
+
+                quote_resp = session.get(
+                    f"{base_url}/quote",
+                    params={"symbol": ticker_symbol, "apikey": self.api_key},
+                    timeout=config.HTTP_TIMEOUT
+                ).json()
+
+            if not isinstance(stats_resp, dict) or stats_resp.get('status') == 'error' or not stats_resp.get('statistics'):
+                message = stats_resp.get('message', 'Azienda non trovata su Twelve Data.') if isinstance(stats_resp, dict) else 'Risposta non valida da Twelve Data.'
+                raise ValueError(message)
+
+            meta: dict = stats_resp.get('meta', {}) or {}
+            stats: dict = stats_resp.get('statistics', {}) or {}
+            valuations: dict = stats.get('valuations_metrics', {}) or {}
+            financials: dict = stats.get('financials', {}) or {}
+            income: dict = financials.get('income_statement', {}) or {}
+            balance: dict = financials.get('balance_sheet', {}) or {}
+            stock_stats: dict = stats.get('stock_statistics', {}) or {}
+
+            ev: float = float(valuations.get('enterprise_value', 0.0) or 0.0)
+            ebitda: float = float(income.get('ebitda', 0.0) or 0.0)
+            ebit: float = ebitda * DEFAULT_EBIT_MARGIN_PROX
+
+            pe: float = float(valuations.get('trailing_pe', 0.0) or 0.0)
+            ps: float = float(valuations.get('price_to_sales_ttm', 0.0) or 0.0)
+            peg: float = float(valuations.get('peg_ratio', 0.0) or 0.0)
+
+            tax_rate: float = 0.21
+            nopat: float = ebit * (1 - tax_rate)
+
+            total_debt: float = float(balance.get('total_debt_mrq', 0.0) or 0.0)
+            book_value_per_share: float = float(balance.get('book_value_per_share_mrq', 0.0) or 0.0)
+            shares_outstanding: float = float(stock_stats.get('shares_outstanding', 0.0) or 0.0)
+            equity: float = book_value_per_share * shares_outstanding
+            invested_capital: float = (total_debt + equity) if equity > 0 else (ev * 0.8 if ev > 0 else 0.0)
+
+            curr_price: float = float((quote_resp or {}).get('close', 0.0) or 0.0) if isinstance(quote_resp, dict) else 0.0
+            prices = {
+                'current': curr_price,
+                '1d': curr_price,
+                '1w': curr_price,
+                '1m': curr_price,
+                '1y': curr_price
+            }
+
+            return StockData(
+                company_name=meta.get('name', ticker_symbol),
+                currency=meta.get('currency', 'USD'),
+                prices=prices,
+                ebit=ebit,
+                ev=ev,
+                nopat=nopat,
+                invested_capital=invested_capital,
+                ebitda=ebitda,
+                pe=pe,
+                ps=ps,
+                peg=peg
+            )
+        except requests.exceptions.RequestException as e:
+            raise ValueError(f"Errore di rete Twelve Data: {str(e)}")
+
+
 class FinancialDataFetcher:
     """
     Orchestratore dei provider di dati azionari (pattern Strategy).
@@ -758,20 +852,25 @@ class FinancialDataFetcher:
     Include:
     - Caching locale dei dati
     - Richieste "hedged": se il provider primario (Yahoo) non risponde entro
-      HEDGE_DELAY_SECONDS, il provider di riserva (FMP) parte in parallelo e
-      vince il primo risultato utile, riducendo l'attesa nel caso peggiore
-      senza sprecare quota FMP quando Yahoo risponde subito.
+      HEDGE_DELAY_SECONDS, il primo provider di riserva configurato parte in
+      parallelo e vince il primo risultato utile, riducendo l'attesa nel caso
+      peggiore senza sprecare quota quando Yahoo risponde subito.
+    - Provider di riserva aggiuntivi (es. Twelve Data) tentati in sequenza
+      solo se sia il primario sia il primo di riserva falliscono entrambi.
     - Fallback finale a dati statici per i ticker piu' comuni
     """
 
-    def __init__(self, fmp_api_key: str = "") -> None:
+    def __init__(self, fmp_api_key: str = "", twelvedata_api_key: str = "") -> None:
         self.fmp_api_key: str = fmp_api_key
+        self.twelvedata_api_key: str = twelvedata_api_key
 
     def _providers(self) -> List[DataProvider]:
         """Catena ordinata dei provider disponibili (il primo e' il preferito)."""
         providers: List[DataProvider] = [YahooProvider()]
         if self.fmp_api_key:
             providers.append(FmpProvider(self.fmp_api_key))
+        if self.twelvedata_api_key:
+            providers.append(TwelveDataProvider(self.twelvedata_api_key))
         return providers
 
     def fetch_data(self, ticker_symbol: str) -> StockData:
@@ -802,9 +901,10 @@ class FinancialDataFetcher:
         providers = self._providers()
         primary = providers[0]
         backup = providers[1] if len(providers) > 1 else None
+        extra_backups = providers[2:]
         errors: List[str] = []
 
-        # 2. Provider primario, con hedge sul provider di riserva se lento
+        # 2. Provider primario, con hedge sul primo provider di riserva se lento
         executor = ThreadPoolExecutor(max_workers=2)
         try:
             primary_future = executor.submit(primary.fetch, ticker_upper)
@@ -832,7 +932,7 @@ class FinancialDataFetcher:
                     errors.append(f"{primary.name}: {str(primary_error)}")
                     logger.warning(f"{primary.name} fallito per {ticker_upper}: {str(primary_error)}")
 
-            # 3. Provider di riserva
+            # 3. Primo provider di riserva
             if backup_future is not None and backup is not None:
                 try:
                     data = backup_future.result()
@@ -845,7 +945,17 @@ class FinancialDataFetcher:
             # Non attende gli hedge ancora in volo: il loro risultato non serve piu'
             executor.shutdown(wait=False, cancel_futures=True)
 
-        # 4. Fallback a dati statici
+        # 4. Provider di riserva aggiuntivi (es. Twelve Data), tentati in sequenza
+        for extra_provider in extra_backups:
+            try:
+                data = extra_provider.fetch(ticker_upper)
+                set_cached(cache_key, data.to_dict())
+                return data
+            except Exception as extra_error:
+                errors.append(f"{extra_provider.name}: {str(extra_error)}")
+                logger.error(f"{extra_provider.name} fallito per {ticker_upper}: {str(extra_error)}")
+
+        # 5. Fallback a dati statici
         if ticker_upper in config.STATIC_FALLBACK:
             logger.warning(f"Utilizzo dati statici per {ticker_upper}")
             return StockData.from_dict(config.STATIC_FALLBACK[ticker_upper])

@@ -175,11 +175,19 @@ class GuideDialog(QDialog):
 
 
 class FmpSetupDialog(QDialog):
+    """Setup opzionale dei provider di riserva a Yahoo Finance (FMP e Twelve Data).
+
+    Entrambe le API key sono facoltative e seguono lo stesso criterio di
+    iscrizione: piano gratuito, inserimento opzionale al primo avvio,
+    saltabile senza perdere funzionalita' (Yahoo resta comunque il provider
+    primario)."""
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Configurazione Database Dati (Opzionale)")
-        self.setMinimumSize(450, 200)
+        self.setMinimumSize(480, 300)
         self.api_key: str = ""
+        self.twelvedata_api_key: str = ""
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -187,17 +195,34 @@ class FmpSetupDialog(QDialog):
         lbl_desc = QLabel(
             "<b>Migliora l'affidabilità dei dati!</b><br><br>"
             "Yahoo Finance a volte è incompleto, specialmente per le borse europee.<br>"
-            "Puoi inserire gratuitamente una API Key di <b>Financial Modeling Prep (FMP)</b>."
+            "Puoi inserire gratuitamente una o più API Key di provider di riserva "
+            "(usati solo se Yahoo non risponde)."
         )
+        lbl_desc.setWordWrap(True)
         layout.addWidget(lbl_desc)
-        btn_link = QPushButton("Ottieni API Key FMP Gratuita")
-        btn_link.setStyleSheet("color: #2980b9; background: transparent; text-align: left; border: none; text-decoration: underline;")
-        btn_link.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_link.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://site.financialmodelingprep.com/developer/docs/")))
-        layout.addWidget(btn_link)
+
+        lbl_fmp = QLabel("<b>Financial Modeling Prep (FMP)</b>")
+        layout.addWidget(lbl_fmp)
+        btn_link_fmp = QPushButton("Ottieni API Key FMP Gratuita")
+        btn_link_fmp.setStyleSheet("color: #2980b9; background: transparent; text-align: left; border: none; text-decoration: underline;")
+        btn_link_fmp.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_link_fmp.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://site.financialmodelingprep.com/developer/docs/")))
+        layout.addWidget(btn_link_fmp)
         self.txt_api = QLineEdit()
         self.txt_api.setPlaceholderText("Incolla qui la tua API Key FMP...")
         layout.addWidget(self.txt_api)
+
+        lbl_td = QLabel("<b>Twelve Data</b>")
+        layout.addWidget(lbl_td)
+        btn_link_td = QPushButton("Ottieni API Key Twelve Data Gratuita")
+        btn_link_td.setStyleSheet("color: #2980b9; background: transparent; text-align: left; border: none; text-decoration: underline;")
+        btn_link_td.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_link_td.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://twelvedata.com/pricing")))
+        layout.addWidget(btn_link_td)
+        self.txt_api_td = QLineEdit()
+        self.txt_api_td.setPlaceholderText("Incolla qui la tua API Key Twelve Data...")
+        layout.addWidget(self.txt_api_td)
+
         btn_box = QDialogButtonBox()
         btn_save = btn_box.addButton("Salva API Key", QDialogButtonBox.ButtonRole.AcceptRole)
         btn_skip = btn_box.addButton("Salta (Usa solo Yahoo)", QDialogButtonBox.ButtonRole.RejectRole)
@@ -208,6 +233,7 @@ class FmpSetupDialog(QDialog):
 
     def _on_save(self) -> None:
         self.api_key = self.txt_api.text().strip()
+        self.twelvedata_api_key = self.txt_api_td.text().strip()
         self.accept()
 
 
@@ -279,9 +305,10 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.settings = QSettings(AUTHOR.replace(" ", ""), APP_NAME.replace(" ", ""))
-        # Carica la API key dal portachiavi di sistema (con fallback e
+        # Carica le API key dal portachiavi di sistema (con fallback e
         # migrazione automatica dalla vecchia copia offuscata in QSettings)
         self.fmp_api_key: str = utils.load_api_key(self.settings)
+        self.twelvedata_api_key: str = utils.load_api_key(self.settings, "twelvedata_api_key")
 
         # Cronologia degli ultimi ticker analizzati con successo
         recent = self.settings.value("recent_tickers", [])
@@ -289,7 +316,7 @@ class MainWindow(QMainWindow):
             recent = [recent] if recent else []
         self.recent_tickers: List[str] = [str(t) for t in (recent or [])][:MAX_RECENT_TICKERS]
 
-        self.fetcher = models.FinancialDataFetcher(self.fmp_api_key)
+        self.fetcher = models.FinancialDataFetcher(self.fmp_api_key, self.twelvedata_api_key)
 
         self.fetch_worker: Optional[FetchWorker] = None
         self.search_worker: Optional[SearchWorker] = None
@@ -306,24 +333,28 @@ class MainWindow(QMainWindow):
 
     def _check_first_run_setup(self) -> None:
         asked: bool = self.settings.value("fmp_asked_once", False, type=bool)
-        if not asked and not self.fmp_api_key:
+        if not asked and not self.fmp_api_key and not self.twelvedata_api_key:
             dialog = FmpSetupDialog(self)
-            if dialog.exec() == QDialog.DialogCode.Accepted and dialog.api_key:
-                self.fmp_api_key = dialog.api_key
-                # Salva nel portachiavi di sistema (fallback: offuscata in QSettings)
-                utils.save_api_key(self.settings, self.fmp_api_key)
-                self.fetcher.fmp_api_key = self.fmp_api_key
-                self.statusBar().showMessage("API Key FMP configurata. Resilienza dati attivata.")
+            if dialog.exec() == QDialog.DialogCode.Accepted and (dialog.api_key or dialog.twelvedata_api_key):
+                configured: List[str] = []
+                if dialog.api_key:
+                    self.fmp_api_key = dialog.api_key
+                    # Salva nel portachiavi di sistema (fallback: offuscata in QSettings)
+                    utils.save_api_key(self.settings, self.fmp_api_key)
+                    self.fetcher.fmp_api_key = self.fmp_api_key
+                    configured.append("FMP")
+                if dialog.twelvedata_api_key:
+                    self.twelvedata_api_key = dialog.twelvedata_api_key
+                    utils.save_api_key(self.settings, self.twelvedata_api_key, "twelvedata_api_key")
+                    self.fetcher.twelvedata_api_key = self.twelvedata_api_key
+                    configured.append("Twelve Data")
+                self.statusBar().showMessage(f"API Key {' e '.join(configured)} configurata. Resilienza dati attivata.")
             self.settings.setValue("fmp_asked_once", True)
 
-    def _center_and_lock_window(self) -> None:
-        screen = QApplication.primaryScreen()
-        if screen:
-            screen_geom = screen.availableGeometry()
-            w = max(800, min(int(screen_geom.width() * 0.6), 1100))
-            h = max(780, min(int(screen_geom.height() * 0.72), 920))
-            self.setFixedSize(w, h)
-            self.move((screen_geom.width() - w) // 2, (screen_geom.height() - h) // 2)
+    def _set_startup_geometry(self) -> None:
+        """Imposta una dimensione minima ragionevole e apre a schermo intero
+        (massimizzata), cosi' l'utente parte gia' con la massima area utile."""
+        self.setMinimumSize(800, 780)
 
     def _init_ui(self) -> None:
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
@@ -334,7 +365,7 @@ class MainWindow(QMainWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        self._center_and_lock_window()
+        self._set_startup_geometry()
         # Palette e stylesheet chiari sono applicati a livello di QApplication
         # in main._apply_light_theme(), così valgono anche per i dialoghi.
 
@@ -404,7 +435,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(export_action)
         file_menu.addSeparator()
 
-        reset_api_action = QAction("&Reimposta API FMP", self)
+        reset_api_action = QAction("&Reimposta API Dati Esterni (FMP/Twelve Data)", self)
         reset_api_action.triggered.connect(self._reset_api_key)
         file_menu.addAction(reset_api_action)
         file_menu.addSeparator()
@@ -439,10 +470,13 @@ class MainWindow(QMainWindow):
 
     def _reset_api_key(self) -> None:
         utils.delete_api_key(self.settings)
+        utils.delete_api_key(self.settings, "twelvedata_api_key")
         self.settings.setValue("fmp_asked_once", False)
         self.fmp_api_key = ""
+        self.twelvedata_api_key = ""
         self.fetcher.fmp_api_key = ""
-        QMessageBox.information(self, "API Resettata",
+        self.fetcher.twelvedata_api_key = ""
+        QMessageBox.information(self, "API Resettate",
                                 "Impostazioni ripristinate. Al riavvio verrà richiesta la chiave.")
 
     # ------------------------------------------------------------------

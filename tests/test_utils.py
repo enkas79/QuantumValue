@@ -2,7 +2,7 @@
 Test per il modulo utils (parsing, formattazione, gestione API key).
 
 Autore: Enrico Martini
-Versione: 0.7.12
+Versione: 0.7.13
 """
 
 import os
@@ -132,6 +132,24 @@ def test_api_key_keyring_roundtrip(monkeypatch):
 
     utils.delete_api_key(settings)
     assert utils.load_api_key(settings) == ""
+
+
+def test_api_key_keyring_roundtrip_second_provider(monkeypatch):
+    """Le chiavi di provider diversi (es. Twelve Data) sono indipendenti da FMP."""
+    fake = FakeKeyring()
+    monkeypatch.setitem(sys.modules, "keyring", fake)
+    settings = FakeSettings()
+
+    utils.save_api_key(settings, "fmp-segreto")
+    utils.save_api_key(settings, "twelvedata-segreto", "twelvedata_api_key")
+
+    assert utils.load_api_key(settings) == "fmp-segreto"
+    assert utils.load_api_key(settings, "twelvedata_api_key") == "twelvedata-segreto"
+
+    utils.delete_api_key(settings, "twelvedata_api_key")
+    assert utils.load_api_key(settings, "twelvedata_api_key") == ""
+    # La chiave FMP resta intatta
+    assert utils.load_api_key(settings) == "fmp-segreto"
 
 
 def test_api_key_fallback_qsettings(monkeypatch):

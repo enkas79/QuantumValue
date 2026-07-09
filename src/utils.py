@@ -5,7 +5,7 @@ Contiene funzioni pure di supporto, gestione globale delle eccezioni
 e inizializzazione del sistema di logging accoppiato su file in area sicura.
 
 Autore: Enrico Martini
-Versione: 0.7.12
+Versione: 0.7.13
 """
 
 import os
@@ -222,14 +222,14 @@ def decrypt_api_key(encrypted: str) -> str:
         return encrypted
 
 
-# Identificativi usati nel portachiavi di sistema per la API key FMP
+# Identificativo del portachiavi di sistema. key_name distingue le chiavi dei
+# singoli provider (FMP, Twelve Data, ...) all'interno dello stesso servizio.
 _KEYRING_SERVICE = "QuantumValue"
-_KEYRING_USER = "fmp_api_key"
 
 
-def save_api_key(settings: Any, api_key: str) -> None:
+def save_api_key(settings: Any, api_key: str, key_name: str = "fmp_api_key") -> None:
     """
-    Salva la API key FMP nel portachiavi di sistema (libreria keyring).
+    Salva una API key provider nel portachiavi di sistema (libreria keyring).
 
     Se il portachiavi non e' disponibile (libreria assente o backend di
     sistema mancante), ricade sul vecchio schema: chiave offuscata con
@@ -238,40 +238,44 @@ def save_api_key(settings: Any, api_key: str) -> None:
     Args:
         settings: QSettings dell'applicazione (usato solo per il fallback).
         api_key (str): La chiave API da salvare.
+        key_name (str): Identificativo del provider (es. "fmp_api_key",
+            "twelvedata_api_key").
     """
     try:
         import keyring
-        keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER, api_key)
+        keyring.set_password(_KEYRING_SERVICE, key_name, api_key)
         # Rimuove l'eventuale copia offuscata legacy da QSettings
-        settings.remove("fmp_api_key")
+        settings.remove(key_name)
         return
     except Exception:
         logger.warning("Portachiavi di sistema non disponibile: salvo la API key offuscata in QSettings.")
-    settings.setValue("fmp_api_key", encrypt_api_key(api_key))
+    settings.setValue(key_name, encrypt_api_key(api_key))
 
 
-def load_api_key(settings: Any) -> str:
+def load_api_key(settings: Any, key_name: str = "fmp_api_key") -> str:
     """
-    Carica la API key FMP dal portachiavi di sistema, con fallback su QSettings.
+    Carica una API key provider dal portachiavi di sistema, con fallback su QSettings.
 
     Se trova una chiave legacy in QSettings e il portachiavi e' disponibile,
     la migra automaticamente al portachiavi e rimuove la copia offuscata.
 
     Args:
         settings: QSettings dell'applicazione.
+        key_name (str): Identificativo del provider (es. "fmp_api_key",
+            "twelvedata_api_key").
 
     Returns:
         str: La API key, o stringa vuota se non configurata.
     """
     try:
         import keyring
-        stored = keyring.get_password(_KEYRING_SERVICE, _KEYRING_USER)
+        stored = keyring.get_password(_KEYRING_SERVICE, key_name)
         if stored:
             return stored
     except Exception:
         pass
 
-    encrypted = str(settings.value("fmp_api_key", "") or "")
+    encrypted = str(settings.value(key_name, "") or "")
     if not encrypted:
         return ""
     api_key = decrypt_api_key(encrypted)
@@ -280,23 +284,25 @@ def load_api_key(settings: Any) -> str:
     if api_key:
         try:
             import keyring
-            keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER, api_key)
-            settings.remove("fmp_api_key")
+            keyring.set_password(_KEYRING_SERVICE, key_name, api_key)
+            settings.remove(key_name)
         except Exception:
             pass
     return api_key
 
 
-def delete_api_key(settings: Any) -> None:
+def delete_api_key(settings: Any, key_name: str = "fmp_api_key") -> None:
     """
-    Elimina la API key FMP sia dal portachiavi di sistema sia da QSettings.
+    Elimina una API key provider sia dal portachiavi di sistema sia da QSettings.
 
     Args:
         settings: QSettings dell'applicazione.
+        key_name (str): Identificativo del provider (es. "fmp_api_key",
+            "twelvedata_api_key").
     """
     try:
         import keyring
-        keyring.delete_password(_KEYRING_SERVICE, _KEYRING_USER)
+        keyring.delete_password(_KEYRING_SERVICE, key_name)
     except Exception:
         pass
-    settings.remove("fmp_api_key")
+    settings.remove(key_name)

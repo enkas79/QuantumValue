@@ -5,7 +5,7 @@ Contiene le costanti globali, i metadati dell'applicazione,
 i parametri centralizzati delle chiamate HTTP e le mappe di conversione fisse.
 
 Autore: Enrico Martini
-Versione: 0.7.12
+Versione: 0.7.13
 """
 
 import os
@@ -36,8 +36,8 @@ def _load_version() -> str:
             with open(version_file, "r", encoding="utf-8") as f:
                 return f.read().strip()
         except IOError:
-            return "0.7.12"
-    return "0.7.12"
+            return "0.7.13"
+    return "0.7.13"
 
 
 # Metadati dell'Applicazione

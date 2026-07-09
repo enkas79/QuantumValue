@@ -6,7 +6,7 @@ Questo è il file che dovrai puntare con PyInstaller per creare l'eseguibile:
 comando: pyinstaller --onefile --windowed main.py
 
 Autore: Enrico Martini
-Versione: 0.7.12
+Versione: 0.7.13
 """
 # comando Windows: pyinstaller --onefile --windowed --add-data "version.txt;." main.py
 # comando macOS/Linux: pyinstaller --onefile --windowed --add-data "version.txt:." main.py
@@ -68,7 +68,7 @@ def main() -> None:
 
     # Istanzia la View (che a sua volta aggancia Models e Controllers)
     window = views.MainWindow()
-    window.show()
+    window.showMaximized()
 
     # Entra nel loop degli eventi
     sys.exit(app.exec())
