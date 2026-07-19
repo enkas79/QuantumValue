@@ -8,12 +8,20 @@ Versione: 0.7.14
 import os
 import sys
 
+import pandas as pd
 import pytest
 
 # Aggiungi la directory src al path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from models import StockData, EtfData, validate_input_data, pick_release_asset
+from models import (
+    StockData,
+    EtfData,
+    validate_input_data,
+    pick_release_asset,
+    _closest_price,
+    _historical_series_from_statements,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -129,3 +137,100 @@ def test_pick_release_asset_no_match():
 
 def test_pick_release_asset_empty_list():
     assert pick_release_asset([], platform="linux") == ""
+
+
+# ---------------------------------------------------------------------------
+# StockData: nuovi campi storici (campanelli d'allarme)
+# ---------------------------------------------------------------------------
+
+def test_stockdata_roundtrip_with_history_fields():
+    data = StockData(
+        company_name="Apple Inc.",
+        pe=25.0,
+        pe_history=[18.0, 20.0, 22.0],
+        ebit_margin_history=[30.0, 28.0, 25.0],
+        fcf=1000.0,
+        fcf_history=[900.0, 950.0, 1000.0],
+        price_change_hist_pct=15.5,
+    )
+    clone = StockData.from_dict(data.to_dict())
+    assert clone == data
+
+
+def test_stockdata_history_defaults_are_empty():
+    data = StockData()
+    assert data.pe_history == []
+    assert data.ebit_margin_history == []
+    assert data.fcf_history == []
+    assert data.fcf == 0.0
+    assert data.price_change_hist_pct == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _closest_price / _historical_series_from_statements
+# ---------------------------------------------------------------------------
+
+def _make_hist(dates, closes):
+    return pd.DataFrame({"Close": closes}, index=pd.DatetimeIndex(dates))
+
+
+def test_closest_price_finds_nearest_date():
+    hist = _make_hist(
+        ["2021-01-04", "2022-01-03", "2023-01-02", "2024-01-02"],
+        [100.0, 150.0, 200.0, 250.0],
+    )
+    assert _closest_price(hist, pd.Timestamp("2022-12-30")) == 200.0
+
+
+def test_closest_price_handles_tz_aware_index():
+    hist = _make_hist(
+        ["2022-01-03", "2023-01-02"],
+        [150.0, 200.0],
+    )
+    hist.index = hist.index.tz_localize("America/New_York")
+    assert _closest_price(hist, pd.Timestamp("2023-01-01")) == 200.0
+
+
+def test_closest_price_empty_history_returns_zero():
+    assert _closest_price(pd.DataFrame(), pd.Timestamp("2023-01-01")) == 0.0
+
+
+def test_historical_series_builds_pe_margin_fcf_and_price_change():
+    # 3 esercizi annuali (dal piu' vecchio al piu' recente), come restituiti
+    # da ticker.income_stmt / ticker.cashflow di yfinance.
+    periods = [pd.Timestamp("2023-12-31"), pd.Timestamp("2024-12-31"), pd.Timestamp("2025-12-31")]
+    inc_stmt = pd.DataFrame(
+        {
+            periods[0]: {"Total Revenue": 1000.0, "EBIT": 300.0, "Diluted EPS": 5.0},
+            periods[1]: {"Total Revenue": 1100.0, "EBIT": 275.0, "Diluted EPS": 5.5},
+            periods[2]: {"Total Revenue": 1200.0, "EBIT": 240.0, "Diluted EPS": 6.0},
+        }
+    )
+    cashflow = pd.DataFrame(
+        {
+            periods[0]: {"Operating Cash Flow": 400.0, "Capital Expenditure": -100.0},
+            periods[1]: {"Operating Cash Flow": 380.0, "Capital Expenditure": -120.0},
+            periods[2]: {"Operating Cash Flow": 350.0, "Capital Expenditure": -150.0},
+        }
+    )
+    hist = _make_hist(
+        ["2023-12-30", "2024-12-30", "2025-12-30"],
+        [100.0, 150.0, 180.0],
+    )
+
+    pe_hist, margin_hist, fcf_hist, price_change = _historical_series_from_statements(inc_stmt, cashflow, hist)
+
+    assert pe_hist == pytest.approx([100.0 / 5.0, 150.0 / 5.5, 180.0 / 6.0])
+    assert margin_hist == pytest.approx([30.0, 25.0, 20.0])
+    assert fcf_hist == pytest.approx([300.0, 260.0, 200.0])
+    assert price_change == pytest.approx(((180.0 / 100.0) - 1) * 100)
+
+
+def test_historical_series_empty_income_statement_returns_empty():
+    pe_hist, margin_hist, fcf_hist, price_change = _historical_series_from_statements(
+        pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    )
+    assert pe_hist == []
+    assert margin_hist == []
+    assert fcf_hist == []
+    assert price_change == 0.0

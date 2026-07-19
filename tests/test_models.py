@@ -13,10 +13,11 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from models import (
-    calculate_metrics, 
-    evaluate_core, 
-    evaluate_opportunity, 
+    calculate_metrics,
+    evaluate_core,
+    evaluate_opportunity,
     evaluate_etf,
+    evaluate_red_flags,
     search_by_name
 )
 
@@ -127,6 +128,100 @@ class TestEvaluateOpportunity:
         score, verdict, color, details = evaluate_opportunity(30.0, 3.0, 2.0, 15.0)
         assert score < 5.0
         assert verdict == "NESSUNA OCCASIONE EVIDENTE"
+
+
+class TestEvaluateRedFlags:
+    """Test per la funzione evaluate_red_flags (i 4 campanelli d'allarme)."""
+
+    def test_no_data_all_nd(self):
+        """Senza alcuno storico, nessuna regola scatta (tutto N/D)."""
+        triggered, verdict, color, details = evaluate_red_flags(0.0, [], 0.0, [], 0.0, [])
+        assert triggered == 0
+        assert verdict == "NESSUN CAMPANELLO D'ALLARME (sui dati disponibili)"
+        assert "N/D" in details['pe_vs_history']['text']
+        assert "N/D" in details['ps_extreme']['text']
+        assert "N/D" in details['margin_contraction']['text']
+        assert "N/D" in details['fcf_negative']['text']
+
+    def test_pe_much_above_historical_average_triggers(self):
+        """P/E attuale >= 1.8x la media storica scatta il campanello."""
+        triggered, verdict, color, details = evaluate_red_flags(
+            50.0, [15.0, 18.0, 20.0], 1.0, [], 0.0, []
+        )
+        assert triggered == 1
+        assert details['pe_vs_history']['color'] == "#c0392b"  # bad
+
+    def test_pe_in_line_with_history_no_flag(self):
+        """P/E vicino alla media storica non scatta nulla."""
+        triggered, verdict, color, details = evaluate_red_flags(
+            20.0, [18.0, 19.0, 21.0], 1.0, [], 0.0, []
+        )
+        assert triggered == 0
+        assert details['pe_vs_history']['color'] == "#27ae60"  # excellent
+
+    def test_ps_extreme_triggers(self):
+        """P/S oltre 20x scatta il campanello (allarme forte)."""
+        triggered, verdict, color, details = evaluate_red_flags(0.0, [], 25.0, [], 0.0, [])
+        assert triggered == 1
+        assert details['ps_extreme']['color'] == "#c0392b"  # bad
+
+    def test_ps_within_limits_no_flag(self):
+        """P/S sotto 15x non scatta nulla."""
+        triggered, verdict, color, details = evaluate_red_flags(0.0, [], 5.0, [], 0.0, [])
+        assert triggered == 0
+        assert details['ps_extreme']['color'] == "#27ae60"  # excellent
+
+    def test_margin_contraction_with_rising_price_triggers(self):
+        """Margine EBIT in calo mentre il prezzo sale: campanello attivo."""
+        triggered, verdict, color, details = evaluate_red_flags(
+            0.0, [], 0.0, [25.0, 20.0, 12.0], 40.0, []
+        )
+        assert triggered == 1
+        assert details['margin_contraction']['color'] == "#c0392b"  # bad
+
+    def test_margin_contraction_without_rising_price_is_warning_only(self):
+        """Margine in calo ma prezzo non salito: solo attenzione, non allarme."""
+        triggered, verdict, color, details = evaluate_red_flags(
+            0.0, [], 0.0, [25.0, 20.0, 12.0], -10.0, []
+        )
+        assert triggered == 0
+        assert details['margin_contraction']['color'] == "#f39c12"  # fair
+
+    def test_fcf_persistently_negative_triggers(self):
+        """FCF negativo per quasi tutti i periodi recenti: campanello attivo."""
+        triggered, verdict, color, details = evaluate_red_flags(
+            0.0, [], 0.0, [], 0.0, [-100.0, -50.0, -80.0]
+        )
+        assert triggered == 1
+        assert details['fcf_negative']['color'] == "#c0392b"  # bad
+
+    def test_fcf_single_negative_period_is_warning_only(self):
+        """Un solo periodo negativo non basta per il pattern persistente."""
+        triggered, verdict, color, details = evaluate_red_flags(
+            0.0, [], 0.0, [], 0.0, [100.0, 80.0, -20.0]
+        )
+        assert triggered == 0
+        assert details['fcf_negative']['color'] == "#f39c12"  # fair
+
+    def test_fcf_positive_no_flag(self):
+        """FCF positivo nel periodo piu' recente: nessun allarme."""
+        triggered, verdict, color, details = evaluate_red_flags(
+            0.0, [], 0.0, [], 0.0, [50.0, 60.0, 70.0]
+        )
+        assert triggered == 0
+        assert details['fcf_negative']['color'] == "#27ae60"  # excellent
+
+    def test_all_four_flags_triggered_gives_strong_verdict(self):
+        """Con tutti e 4 i campanelli attivi il verdetto e' il piu' severo."""
+        triggered, verdict, color, details = evaluate_red_flags(
+            60.0, [15.0, 18.0, 20.0],
+            25.0,
+            [25.0, 20.0, 12.0], 40.0,
+            [-100.0, -50.0, -80.0]
+        )
+        assert triggered == 4
+        assert verdict == "PIU' CAMPANELLI D'ALLARME ATTIVI (valutare con cautela)"
+        assert color == "#c0392b"  # bad
 
 
 class TestEvaluateETF:

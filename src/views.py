@@ -52,6 +52,7 @@ METRIC_TOOLTIPS: Dict[str, str] = {
     'nopat': "NOPAT: utile operativo netto dopo le tasse.",
     'invested_capital': "Capitale Investito: debito totale + patrimonio netto.",
     'ebitda': "EBITDA: utile operativo prima di ammortamenti e svalutazioni.",
+    'fcf': "Free Cash Flow: cassa generata dopo le spese in conto capitale (capex).\nNegativo su piu' anni consecutivi, senza una giustificazione di crescita, e' un campanello d'allarme.",
     'ter': "TER: costi annuali di gestione dell'ETF.\nIdeale: inferiore allo 0,25%.",
     'aum': "AUM: capitale totale gestito dal fondo (in milioni).\nIdeale: superiore a 500M (piu' liquidita', meno rischio di chiusura).",
     'ret_1y': "Rendimento dell'ultimo anno.",
@@ -340,6 +341,14 @@ class MainWindow(QMainWindow):
         self.currency_symbol: str = ""
         self.inputs: Dict[str, QLineEdit] = {}
         self.etf_inputs: Dict[str, QLineEdit] = {}
+        # Serie storiche dell'ultimo titolo scaricato (P/E, margine EBIT, FCF,
+        # variazione % di prezzo sullo stesso arco temporale). Non sono valori
+        # numerici singoli, quindi non passano dagli input editabili come gli
+        # altri campi: servono ai 4 campanelli d'allarme di evaluate_red_flags.
+        self._last_pe_history: List[float] = []
+        self._last_ebit_margin_history: List[float] = []
+        self._last_price_change_hist_pct: float = 0.0
+        self._last_fcf_history: List[float] = []
 
         self._init_ui()
         QTimer.singleShot(200, self._check_first_run_setup)
@@ -592,7 +601,7 @@ class MainWindow(QMainWindow):
                 rows.append((key, lbl.text()))
             field_names = {'ebit': 'EBIT', 'ev': 'EV', 'nopat': 'NOPAT',
                            'invested_capital': 'Capitale Investito', 'ebitda': 'EBITDA',
-                           'pe': 'P/E', 'ps': 'P/S', 'peg': 'PEG'}
+                           'pe': 'P/E', 'ps': 'P/S', 'peg': 'PEG', 'fcf': 'Free Cash Flow'}
             for key, le in self.inputs.items():
                 rows.append((field_names.get(key, key), le.text()))
             metric_names = {'ey': 'Earnings Yield', 'roic': 'ROIC', 'ev_ebitda': 'EV/EBITDA'}
@@ -608,6 +617,11 @@ class MainWindow(QMainWindow):
                 rows.append((opp_names.get(key, key), f"{lbl.text()} {eval_txt}".strip()))
             rows.append(("Punteggio Occasioni", self.lbl_opp_score.text()))
             rows.append(("Verdetto Occasioni", self.lbl_opp_recommendation.text()))
+            flag_names = {'pe_vs_history': 'Campanello P/E vs Storico', 'ps_extreme': 'Campanello P/S',
+                          'margin_contraction': 'Campanello Margini', 'fcf_negative': 'Campanello FCF'}
+            for key, lbl in self.flag_labels.items():
+                rows.append((flag_names.get(key, key), lbl.text()))
+            rows.append(("Verdetto Campanelli d'Allarme", self.lbl_flags_summary.text()))
         else:
             rows.append(("Tipo", "ETF"))
             rows.append(("Ticker/ISIN", self.input_ticker.text().strip()))
@@ -781,7 +795,8 @@ class MainWindow(QMainWindow):
             ('ebit', 'EBIT:', 2, 0), ('ev', 'EV:', 2, 2),
             ('nopat', 'NOPAT:', 3, 0), ('invested_capital', 'Cap. Investito:', 3, 2),
             ('ebitda', 'EBITDA:', 4, 0), ('pe', 'P/E Ratio:', 4, 2),
-            ('ps', 'P/S Ratio:', 5, 0), ('peg', 'PEG Ratio:', 5, 2)
+            ('ps', 'P/S Ratio:', 5, 0), ('peg', 'PEG Ratio:', 5, 2),
+            ('fcf', 'Free Cash Flow:', 6, 0)
         ]
 
         for key, text, row, col in fields:
@@ -909,6 +924,34 @@ class MainWindow(QMainWindow):
         eval_opp_layout.addWidget(self.lbl_opp_score)
         eval_opp_layout.addWidget(self.lbl_opp_recommendation)
         layout.addWidget(eval_opp_group)
+
+        flags_group = QGroupBox("Campanelli d'Allarme (Rischio Valutazione)")
+        flags_layout = QVBoxLayout(flags_group)
+        self.flag_labels: Dict[str, QLabel] = {}
+
+        flag_rows = [
+            ('pe_vs_history', "P/E vs media storica:"),
+            ('ps_extreme', "P/S oltre i limiti:"),
+            ('margin_contraction', "Margini in contrazione:"),
+            ('fcf_negative', "Free Cash Flow negativo:"),
+        ]
+        for key, title in flag_rows:
+            row_layout = QHBoxLayout()
+            lbl_title = QLabel(title)
+            lbl_title.setMinimumWidth(160)
+            row_layout.addWidget(lbl_title)
+            lbl_val = QLabel("N/D")
+            lbl_val.setWordWrap(True)
+            row_layout.addWidget(lbl_val, stretch=1)
+            self.flag_labels[key] = lbl_val
+            flags_layout.addLayout(row_layout)
+
+        self.lbl_flags_summary = QLabel("In attesa di dati...")
+        self.lbl_flags_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_flags_summary.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        flags_layout.addSpacing(10)
+        flags_layout.addWidget(self.lbl_flags_summary)
+        layout.addWidget(flags_group)
         layout.addStretch()
 
     def _setup_tab_etf(self, tab: QWidget) -> None:
@@ -1057,6 +1100,10 @@ class MainWindow(QMainWindow):
         try:
             self.lbl_company_name.setText(f"Azienda: {data.company_name}")
             self.currency_symbol = data.currency
+            self._last_pe_history = data.pe_history
+            self._last_ebit_margin_history = data.ebit_margin_history
+            self._last_price_change_hist_pct = data.price_change_hist_pct
+            self._last_fcf_history = data.fcf_history
 
             prices: Dict[str, float] = data.prices
             curr: float = prices.get('current', 0.0)
@@ -1204,6 +1251,18 @@ class MainWindow(QMainWindow):
                 self.opp_eval_labels[k].setText(opp_evals[k]['text'])
                 self.opp_eval_labels[k].setStyleSheet(f"color: {opp_evals[k]['color']};")
 
+        flags_count, flags_txt, flags_color, flags_details = models.evaluate_red_flags(
+            pe, self._last_pe_history, ps,
+            self._last_ebit_margin_history, self._last_price_change_hist_pct,
+            self._last_fcf_history
+        )
+        self.lbl_flags_summary.setText(flags_txt)
+        self.lbl_flags_summary.setStyleSheet(f"color: {flags_color};")
+        for k in ['pe_vs_history', 'ps_extreme', 'margin_contraction', 'fcf_negative']:
+            if k in flags_details:
+                self.flag_labels[k].setText(flags_details[k]['text'])
+                self.flag_labels[k].setStyleSheet(f"color: {flags_details[k]['color']};")
+
     def _on_etf_fetch_success(self, data: models.EtfData) -> None:
         import logging
         import traceback
@@ -1342,6 +1401,9 @@ class MainWindow(QMainWindow):
         self.lbl_opp_score.setStyleSheet(f"color: {theme.color('muted')};")
         self.lbl_opp_recommendation.setText("Dati incompleti o errati.")
         self.lbl_opp_recommendation.setStyleSheet(f"color: {theme.color('muted')};")
+        for lbl in self.flag_labels.values(): lbl.setText("N/D")
+        self.lbl_flags_summary.setText("Dati incompleti o errati.")
+        self.lbl_flags_summary.setStyleSheet(f"color: {theme.color('muted')};")
 
     def _reset_etf_results(self) -> None:
         for lbl in self.etf_res_labels.values(): lbl.setText("--")

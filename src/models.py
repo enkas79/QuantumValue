@@ -63,6 +63,15 @@ class StockData:
     pe: float = 0.0
     ps: float = 0.0
     peg: float = 0.0
+    fcf: float = 0.0
+    # Serie storiche (dal periodo piu' vecchio al piu' recente disponibile,
+    # tipicamente fino a 4-5 esercizi annuali) usate dai 4 "campanelli
+    # d'allarme" di evaluate_red_flags. Liste vuote quando il provider non le
+    # fornisce: la valutazione le tratta come N/D, non come regola violata.
+    pe_history: List[float] = field(default_factory=list)
+    ebit_margin_history: List[float] = field(default_factory=list)
+    fcf_history: List[float] = field(default_factory=list)
+    price_change_hist_pct: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializza in dizionario JSON-compatibile (per cache e fallback)."""
@@ -351,6 +360,159 @@ def evaluate_opportunity(
     return score, verdict, v_color, res
 
 
+def evaluate_red_flags(
+    pe: Union[float, str],
+    pe_history: List[float],
+    ps: Union[float, str],
+    ebit_margin_history: List[float],
+    price_change_hist_pct: Union[float, str],
+    fcf_history: List[float]
+) -> Tuple[int, str, str, Dict[str, Dict[str, str]]]:
+    """
+    Verifica i 4 "campanelli d'allarme" da valutazione (quality/value trap):
+
+    1. P/E molto oltre la propria media storica (non una soglia assoluta).
+    2. P/S oltre i limiti tipici di un'azienda matura (>= 15-20x fatturato).
+    3. Margine EBIT in contrazione mentre il prezzo del titolo sale.
+    4. Free Cash Flow negativo su piu' periodi consecutivi.
+
+    Ogni regola richiede uno storico minimo: se il provider non lo fornisce
+    (es. TwelveData/EODHD, o inserimento manuale dei soli valori correnti),
+    la voce risulta "N/D" e non conta come campanello attivo, per evitare
+    falsi allarmi su dati assenti.
+
+    Args:
+        pe: P/E corrente.
+        pe_history: Storico del P/E (dal periodo piu' vecchio al piu' recente).
+        ps: P/S corrente.
+        ebit_margin_history: Storico del margine EBIT in % (vecchio -> recente).
+        price_change_hist_pct: Variazione % del prezzo sull'arco temporale
+            coperto da ebit_margin_history (stesso periodo, per confrontare
+            margini e prezzo in modo coerente).
+        fcf_history: Storico del Free Cash Flow (vecchio -> recente).
+
+    Returns:
+        Tuple[int, str, str, Dict[str, Dict[str, str]]]:
+        (campanelli attivi, verdetto sintetico, colore, dettagli per regola).
+    """
+    col_exc = config.COLORS["excellent"]
+    col_fair = config.COLORS["fair"]
+    col_bad = config.COLORS["bad"]
+    col_neutral = config.COLORS["neutral"]
+
+    details: Dict[str, Dict[str, str]] = {}
+    triggered = 0
+
+    # 1. P/E molto oltre la media storica
+    f_pe: float = float(pe) if isinstance(pe, (int, float)) else 0.0
+    valid_pe_hist = [float(v) for v in pe_history if isinstance(v, (int, float)) and v > 0]
+    if f_pe > 0 and len(valid_pe_hist) >= 2:
+        avg_hist_pe = sum(valid_pe_hist) / len(valid_pe_hist)
+        ratio = f_pe / avg_hist_pe if avg_hist_pe > 0 else 0.0
+        if ratio >= 1.8:
+            triggered += 1
+            details['pe_vs_history'] = {
+                'text': f"P/E {f_pe:.1f} vs media storica {avg_hist_pe:.1f} ({ratio:.1f}x): "
+                        f"ben oltre la norma storica del titolo.",
+                'color': col_bad
+            }
+        elif ratio >= 1.3:
+            details['pe_vs_history'] = {
+                'text': f"P/E {f_pe:.1f} vs media storica {avg_hist_pe:.1f} ({ratio:.1f}x): "
+                        f"sopra la media, da monitorare.",
+                'color': col_fair
+            }
+        else:
+            details['pe_vs_history'] = {
+                'text': f"P/E {f_pe:.1f} in linea con la media storica ({avg_hist_pe:.1f}).",
+                'color': col_exc
+            }
+    else:
+        details['pe_vs_history'] = {'text': "N/D: storico P/E insufficiente per il confronto.", 'color': col_neutral}
+
+    # 2. P/S oltre i limiti tipici per un'azienda matura (non una startup pre-ricavi)
+    f_ps: float = float(ps) if isinstance(ps, (int, float)) else 0.0
+    if f_ps > 0:
+        if f_ps >= 20:
+            triggered += 1
+            details['ps_extreme'] = {
+                'text': f"P/S {f_ps:.1f}x: oltre 20 volte il fatturato. Il mercato pretende margini "
+                        f"futuri quasi perfetti (non applicabile a startup pre-ricavi).",
+                'color': col_bad
+            }
+        elif f_ps >= 15:
+            triggered += 1
+            details['ps_extreme'] = {
+                'text': f"P/S {f_ps:.1f}x: oltre 15 volte il fatturato, valutazione tirata per un'azienda matura.",
+                'color': col_fair
+            }
+        else:
+            details['ps_extreme'] = {'text': f"P/S {f_ps:.1f}x entro i limiti tipici (< 15x).", 'color': col_exc}
+    else:
+        details['ps_extreme'] = {'text': "N/D: P/S non disponibile.", 'color': col_neutral}
+
+    # 3. Margine EBIT in contrazione mentre il prezzo sale
+    valid_margins = [float(v) for v in ebit_margin_history if isinstance(v, (int, float))]
+    f_price_chg: float = float(price_change_hist_pct) if isinstance(price_change_hist_pct, (int, float)) else 0.0
+    if len(valid_margins) >= 2:
+        margin_declining = valid_margins[-1] < valid_margins[0]
+        if margin_declining and f_price_chg > 0:
+            triggered += 1
+            details['margin_contraction'] = {
+                'text': f"Margine EBIT sceso da {valid_margins[0]:.1f}% a {valid_margins[-1]:.1f}% "
+                        f"mentre il prezzo e' salito del {f_price_chg:.1f}%: il mercato potrebbe "
+                        f"comprare una narrativa, non i bilanci.",
+                'color': col_bad
+            }
+        elif margin_declining:
+            details['margin_contraction'] = {
+                'text': f"Margine EBIT in calo ({valid_margins[0]:.1f}% -> {valid_margins[-1]:.1f}%), "
+                        f"ma il prezzo non e' salito in parallelo.",
+                'color': col_fair
+            }
+        else:
+            details['margin_contraction'] = {
+                'text': f"Margine EBIT stabile o in crescita ({valid_margins[0]:.1f}% -> {valid_margins[-1]:.1f}%).",
+                'color': col_exc
+            }
+    else:
+        details['margin_contraction'] = {'text': "N/D: storico margini insufficiente.", 'color': col_neutral}
+
+    # 4. FCF negativo su piu' periodi consecutivi
+    valid_fcf = [float(v) for v in fcf_history if isinstance(v, (int, float))]
+    if valid_fcf:
+        negative_periods = sum(1 for v in valid_fcf if v < 0)
+        if negative_periods >= 2 and negative_periods >= len(valid_fcf) - 1:
+            triggered += 1
+            details['fcf_negative'] = {
+                'text': f"FCF negativo in {negative_periods}/{len(valid_fcf)} degli ultimi periodi: "
+                        f"verifica se giustificato da investimenti di crescita (es. capex elevati), "
+                        f"altrimenti rischio di bruciare cassa.",
+                'color': col_bad
+            }
+        elif valid_fcf[-1] < 0:
+            details['fcf_negative'] = {
+                'text': f"FCF piu' recente negativo ({valid_fcf[-1]:,.0f}), ma non ancora un pattern persistente.",
+                'color': col_fair
+            }
+        else:
+            details['fcf_negative'] = {
+                'text': f"FCF positivo nel periodo piu' recente ({valid_fcf[-1]:,.0f}).",
+                'color': col_exc
+            }
+    else:
+        details['fcf_negative'] = {'text': "N/D: Free Cash Flow non disponibile.", 'color': col_neutral}
+
+    if triggered >= 3:
+        verdict, v_color = "PIU' CAMPANELLI D'ALLARME ATTIVI (valutare con cautela)", col_bad
+    elif triggered >= 1:
+        verdict, v_color = f"{triggered} CAMPANELLO D'ALLARME ATTIVO", col_fair
+    else:
+        verdict, v_color = "NESSUN CAMPANELLO D'ALLARME (sui dati disponibili)", col_exc
+
+    return triggered, verdict, v_color, details
+
+
 def evaluate_etf(
     ter: Union[float, str], 
     aum: Union[float, str], 
@@ -470,6 +632,106 @@ def _parse_perc(val: Any) -> float:
         return 0.0
 
 
+def _closest_price(hist_df: Any, target_date: Any) -> float:
+    """
+    Trova il prezzo di chiusura piu' vicino a una data target in uno storico
+    yfinance (`ticker.history`), usato per abbinare un prezzo alle date di
+    fine esercizio dei bilanci annuali (colonne di `income_stmt`/`cashflow`).
+
+    Gestisce la differenza di timezone tra l'indice dei prezzi (spesso
+    tz-aware, fuso della borsa) e le date dei bilanci (tz-naive).
+
+    Args:
+        hist_df: DataFrame storico prezzi con colonna 'Close' e indice datetime.
+        target_date: Data target (Timestamp o compatibile).
+
+    Returns:
+        float: Prezzo di chiusura piu' vicino, 0.0 se non determinabile.
+    """
+    if hist_df is None or hist_df.empty:
+        return 0.0
+    try:
+        target = pd.Timestamp(target_date)
+        if target.tzinfo is not None:
+            target = target.tz_localize(None)
+        idx = hist_df.index
+        idx_naive = idx.tz_localize(None) if getattr(idx, 'tz', None) is not None else idx
+        pos = int(abs(idx_naive - target).argmin())
+        return float(hist_df['Close'].iloc[pos])
+    except (TypeError, ValueError, KeyError):
+        return 0.0
+
+
+def _historical_series_from_statements(
+    inc_stmt: Any,
+    cashflow: Any,
+    hist_df: Any
+) -> Tuple[List[float], List[float], List[float], float]:
+    """
+    Costruisce le serie storiche (P/E, margine EBIT, FCF) e la variazione %
+    del prezzo sullo stesso arco temporale, a partire dai bilanci annuali
+    (`income_stmt`, `cashflow`) e dallo storico prezzi di un Ticker yfinance.
+
+    Le serie sono ordinate dal periodo piu' vecchio al piu' recente. Un
+    periodo contribuisce a una serie solo se i dati necessari sono presenti
+    e plausibili (es. EPS > 0 per il P/E): eventuali buchi non generano
+    valori fittizi, riducono solo la lunghezza della serie.
+
+    Args:
+        inc_stmt: `ticker.income_stmt` (colonne = date di fine esercizio).
+        cashflow: `ticker.cashflow` (stesse colonne, voci di cassa).
+        hist_df: `ticker.history(...)` con storico prezzi di pari periodo.
+
+    Returns:
+        Tuple[List[float], List[float], List[float], float]:
+        (pe_history, ebit_margin_history, fcf_history, price_change_hist_pct).
+    """
+    pe_history: List[float] = []
+    ebit_margin_history: List[float] = []
+    fcf_history: List[float] = []
+    price_change_hist_pct: float = 0.0
+
+    if inc_stmt is None or inc_stmt.empty:
+        return pe_history, ebit_margin_history, fcf_history, price_change_hist_pct
+
+    periods_sorted = sorted(inc_stmt.columns)
+
+    for period in periods_sorted:
+        col = inc_stmt[period]
+        revenue = col.get('Total Revenue', None)
+        ebit_p = col.get('EBIT', col.get('Operating Income', None))
+        eps_p = col.get('Diluted EPS', col.get('Basic EPS', None))
+
+        if revenue is not None and pd.notna(revenue) and revenue != 0 and ebit_p is not None and pd.notna(ebit_p):
+            ebit_margin_history.append((float(ebit_p) / float(revenue)) * 100)
+
+        if eps_p is not None and pd.notna(eps_p) and float(eps_p) > 0:
+            price_at_period = _closest_price(hist_df, period)
+            if price_at_period > 0:
+                pe_history.append(price_at_period / float(eps_p))
+
+    if cashflow is not None and not cashflow.empty:
+        cf_periods_sorted = sorted(cashflow.columns)
+        for period in cf_periods_sorted:
+            col = cashflow[period]
+            fcf_p = col.get('Free Cash Flow', None)
+            if fcf_p is None or pd.isna(fcf_p):
+                ocf = col.get('Operating Cash Flow', col.get('Total Cash From Operating Activities', None))
+                capex = col.get('Capital Expenditure', col.get('Capital Expenditures', None))
+                if ocf is not None and pd.notna(ocf) and capex is not None and pd.notna(capex):
+                    fcf_p = float(ocf) + float(capex)
+            if fcf_p is not None and pd.notna(fcf_p):
+                fcf_history.append(float(fcf_p))
+
+    if len(periods_sorted) >= 2 and hist_df is not None and not hist_df.empty:
+        price_start = _closest_price(hist_df, periods_sorted[0])
+        price_end = float(hist_df['Close'].iloc[-1])
+        if price_start > 0:
+            price_change_hist_pct = ((price_end / price_start) - 1) * 100
+
+    return pe_history, ebit_margin_history, fcf_history, price_change_hist_pct
+
+
 def fetch_etf_data(query: str) -> "EtfData":
     """
     Scarica i dati analitici dell'ETF indicato interrogando Yahoo Finance.
@@ -561,8 +823,15 @@ class YahooProvider(DataProvider):
         ev: float = float(info.get('enterpriseValue', 0.0) or 0.0)
         ebitda: float = float(info.get('ebitda', 0.0) or 0.0)
 
-        # Recupera lo storico dei prezzi
-        hist = ticker.history(period="1y")
+        # Recupera lo storico dei prezzi. Si scarica una finestra di 5 anni
+        # (invece dell'anno usato in precedenza) perche' serve anche per
+        # abbinare un prezzo alle date di fine esercizio dei bilanci annuali
+        # (fino a ~4-5 anni indietro) nel calcolo dei campanelli d'allarme.
+        hist_5y = ticker.history(period="5y")
+        # L'anno piu' recente (per prezzo corrente, variazioni e sparkline)
+        # resta una finestra sugli ultimi ~252 giorni di borsa, coerente con
+        # il comportamento precedente basato su period="1y".
+        hist = hist_5y.tail(260) if not hist_5y.empty else hist_5y
         prices: Dict[str, float] = {'current': 0.0, '1d': 0.0, '1w': 0.0, '1m': 0.0, '1y': 0.0}
         sparkline: List[float] = []
 
@@ -589,6 +858,12 @@ class YahooProvider(DataProvider):
         # Recupera i dati dal bilancio
         inc_stmt = ticker.income_stmt
         bal_sheet = ticker.balance_sheet
+        cashflow = ticker.cashflow
+
+        pe_history, ebit_margin_history, fcf_history, price_change_hist_pct = (
+            _historical_series_from_statements(inc_stmt, cashflow, hist_5y)
+        )
+        fcf: float = fcf_history[-1] if fcf_history else 0.0
 
         # Calcola EBIT
         ebit: float = ebitda * DEFAULT_EBIT_MARGIN_PROX
@@ -643,7 +918,12 @@ class YahooProvider(DataProvider):
             ebitda=ebitda,
             pe=pe,
             ps=ps,
-            peg=peg
+            peg=peg,
+            fcf=fcf,
+            pe_history=pe_history,
+            ebit_margin_history=ebit_margin_history,
+            fcf_history=fcf_history,
+            price_change_hist_pct=price_change_hist_pct
         )
 
 
@@ -706,6 +986,16 @@ class FmpProvider(DataProvider):
                 ).json()
                 inc: dict = inc_resp[0] if inc_resp else {}
 
+                # Free Cash Flow piu' recente (per il campanello d'allarme FCF).
+                # Nota: a differenza di Yahoo, qui non si recupera uno storico
+                # pluriennale ne' i prezzi storici, quindi le regole P/E-vs-media
+                # e margine-vs-prezzo restano N/D su questo provider di riserva.
+                cf_resp = session.get(
+                    f"{base_url}/cash-flow-statement/{ticker_symbol}?limit=1&apikey={self.api_key}",
+                    timeout=config.HTTP_TIMEOUT
+                ).json()
+                cf: dict = cf_resp[0] if cf_resp else {}
+
             ev: float = float(km.get('enterpriseValueTTM', 0.0) or 0.0)
             ebitda: float = float(inc.get('ebitda', 0.0) or 0.0)
             ebit: float = float(inc.get('operatingIncome', ebitda * DEFAULT_EBIT_MARGIN_PROX) or ebitda * DEFAULT_EBIT_MARGIN_PROX)
@@ -725,12 +1015,14 @@ class FmpProvider(DataProvider):
             nopat: float = ebit * (1 - min(max(tax_rate, 0.15), 0.35))
             invested_capital: float = float(km.get('investedCapitalTTM', ev * 0.8) or ev * 0.8)
 
+            fcf: float = float(cf.get('freeCashFlow', 0.0) or 0.0)
+
             curr_price = float(profile.get('price', 0.0))
             prices = {
-                'current': curr_price, 
-                '1d': curr_price, 
-                '1w': curr_price, 
-                '1m': curr_price, 
+                'current': curr_price,
+                '1d': curr_price,
+                '1w': curr_price,
+                '1m': curr_price,
                 '1y': curr_price
             }
 
@@ -745,7 +1037,9 @@ class FmpProvider(DataProvider):
                 ebitda=ebitda,
                 pe=pe,
                 ps=ps,
-                peg=peg
+                peg=peg,
+                fcf=fcf,
+                fcf_history=[fcf] if cf else []
             )
         except requests.exceptions.RequestException as e:
             raise ValueError(f"Errore di rete FMP: {str(e)}")
